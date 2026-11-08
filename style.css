@@ -113,6 +113,18 @@ body {
 .zoom button:first-of-type { border-radius: 9px 0 0 9px; }
 .zoom button:last-of-type { border-radius: 0 9px 9px 0; }
 .zoom button[aria-pressed=true] { background: var(--green); color: var(--sand); border-color: var(--green); }
+.est-note {
+  margin: 0;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600;
+  color: #9A4A12;
+  background: rgba(232, 105, 46, 0.12);
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+.est-note::before { content: "!"; display: inline-grid; place-items: center; width: 15px; height: 15px; border-radius: 50%; background: #C9561F; color: #fff; font-size: 11px; font-weight: 800; }
+.est-note[hidden] { display: none; }
+@media (prefers-color-scheme: dark) { .est-note { color: #FFB68A; background: rgba(232, 105, 46, 0.18); } }
 .legend { margin: 0 0 0 auto; font-size: 12px; color: var(--muted); display: flex; gap: 10px; }
 .lg-t { font-weight: 700; color: var(--ink); }
 .lg-r { color: var(--blue); font-weight: 600; }

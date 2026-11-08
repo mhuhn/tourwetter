@@ -35,7 +35,9 @@ function parseGpx(text, DOMParserImpl) {
         if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
         const eleEl = el.getElementsByTagNameNS('*', 'ele')[0];
         const ele = eleEl ? parseFloat(eleEl.textContent) : NaN;
-        points.push({ lat, lon, ele });
+        const timeEl = el.getElementsByTagNameNS('*', 'time')[0];
+        const ms = timeEl ? Date.parse(timeEl.textContent.trim()) : NaN;
+        points.push({ lat, lon, ele, time: Number.isFinite(ms) ? ms / 1000 : NaN });
       }
     }
   }
@@ -69,10 +71,33 @@ function routeStats(points) {
   return { cum, totalKm: cum[cum.length - 1], ascent: Math.round(ascent) };
 }
 
-/** Wetterpunkte alle STEP_MIN Minuten bei konstanter Geschwindigkeit (plus Zielpunkt). */
+/** Fahrzeit (Minuten seit Start) je Trackpunkt aus den GPX-Zeiten, oder null, wenn unbrauchbar. */
+function gpxTimeline(points, totalKm) {
+  if (!points.every(p => Number.isFinite(p.time))) return null;
+  const t0 = points[0].time;
+  const mins = [];
+  for (let i = 0; i < points.length; i++) {
+    if (i > 0 && points[i].time < points[i - 1].time) return null; // nicht monoton
+    mins.push((points[i].time - t0) / 60);
+  }
+  const durationMin = mins[mins.length - 1];
+  if (!(durationMin > 0)) return null;
+  const avgKmh = totalKm / (durationMin / 60);
+  if (avgKmh < 1 || avgKmh > 80) return null; // unplausibel
+  return mins;
+}
+
+/**
+ * Wetterpunkte alle STEP_MIN Minuten Fahrzeit (plus Zielpunkt).
+ * Fahrzeit aus den GPX-Zeiten, falls vorhanden und plausibel, sonst konstante Geschwindigkeit.
+ */
 function samplePoints(points, speedKmh, stepMin = STEP_MIN) {
   const { cum, totalKm } = routeStats(points);
-  const durationMin = totalKm / speedKmh * 60;
+  const timeline = gpxTimeline(points, totalKm);
+  const usesGpxTime = !!timeline;
+  // Fahrzeit je Trackpunkt in Minuten
+  const tm = timeline || cum.map(d => d / speedKmh * 60);
+  const durationMin = tm[tm.length - 1];
   const offsets = [];
   for (let t = 0; t <= durationMin + 1e-9; t += stepMin) offsets.push(t);
   if (durationMin - offsets[offsets.length - 1] > stepMin / 3) offsets.push(durationMin);
@@ -80,20 +105,20 @@ function samplePoints(points, speedKmh, stepMin = STEP_MIN) {
   const out = [];
   let j = 0;
   for (const tMin of offsets) {
-    const d = Math.min(totalKm, speedKmh * tMin / 60);
-    while (j < cum.length - 2 && cum[j + 1] < d) j++;
+    const t = Math.min(durationMin, tMin);
+    while (j < tm.length - 2 && tm[j + 1] < t) j++;
     const a = points[j], b = points[j + 1];
-    const seg = cum[j + 1] - cum[j];
-    const f = seg > 0 ? Math.min(1, Math.max(0, (d - cum[j]) / seg)) : 0;
+    const span = tm[j + 1] - tm[j];
+    const f = span > 0 ? Math.min(1, Math.max(0, (t - tm[j]) / span)) : 0;
     out.push({
       lat: a.lat + (b.lat - a.lat) * f,
       lon: a.lon + (b.lon - a.lon) * f,
       ele: hasEle ? a.ele + (b.ele - a.ele) * f : NaN,
-      km: d,
+      km: cum[j] + (cum[j + 1] - cum[j]) * f,
       tMin
     });
   }
-  return { samples: out, totalKm, durationMin, hasEle };
+  return { samples: out, totalKm, durationMin, hasEle, usesGpxTime };
 }
 
 function buildForecastUrls(samples, hoursNeeded) {
@@ -181,7 +206,7 @@ function zoomMatrix(samples, matrix, zy, zx) {
 function roundTo30(sec) { return Math.round(sec / 1800) * 1800; }
 
 if (typeof module !== 'undefined') {
-  module.exports = { parseGpx, haversineKm, routeStats, samplePoints, buildForecastUrls, valueAt, buildMatrix, aggregate, zoomMatrix, roundTo30 };
+  module.exports = { parseGpx, haversineKm, routeStats, gpxTimeline, samplePoints, buildForecastUrls, valueAt, buildMatrix, aggregate, zoomMatrix, roundTo30 };
 }
 
 /* ---------- Browser-App ---------- */
@@ -270,15 +295,18 @@ if (typeof document !== 'undefined') (function () {
 
   function computeSamples() {
     state.sampled = samplePoints(state.route.points, state.speed);
-    const { totalKm, durationMin } = state.sampled;
+    const { totalKm, durationMin, usesGpxTime } = state.sampled;
     const stats = routeStats(state.route.points);
     const parts = [];
     if (state.route.name) parts.push(state.route.name);
     parts.push(fmtNum1.format(totalKm) + ' km');
     if (Number.isFinite(stats.ascent) && stats.ascent > 0) parts.push(stats.ascent + ' hm');
-    parts.push(fmtDuration(durationMin) + ' h bei ' + String(state.speed).replace('.', ',') + ' km/h');
+    parts.push(fmtDuration(durationMin) + ' h');
     $('routeInfo').textContent = parts.join(' · ');
     $('routeInfo').title = parts.join(' · ');
+    const speedTxt = String(state.speed).replace('.', ',');
+    $('estNote').hidden = usesGpxTime;
+    $('estNote').textContent = 'Fahrzeiten geschätzt (Ø ' + speedTxt + ' km/h)';
   }
 
   /* ---- Wetter laden ---- */
