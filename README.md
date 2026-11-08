@@ -15,7 +15,7 @@ PWA, die für eine GPX-Route das Wetter entlang der Strecke für verschiedene Ab
    - **Uhrzeit-Pausen:** Spaltenkopf antippen → Pause nach dieser Abfahrtsspalte, also eine Stunde später (Spalte 22:00 → Pause um 23:00, z. B. 7 h). Jede Abfahrt davor pausiert dann um diese Uhrzeit; Punkte danach werden entsprechend später erreicht.
    - **Demo:** Mit `?demo` in der URL wird zusätzlich simulierter Regen in die Daten gemischt.
    - **Zeilen:** Tourpunkte alle 15 min Fahrzeit. Enthält die GPX plausible `<time>`-Angaben, wird die Fahrzeit daraus übernommen; sonst wird mit der Ø-Geschwindigkeit aus dem Menü geschätzt (Standard 20 km/h) und ein Hinweis angezeigt.
-   - **Spalten:** Abfahrt jetzt, +1 h, … +23 h (Kopf auf 30 min gerundet).
+   - **Spalten:** Abfahrt jetzt, +1 h, … +47 h (Kopf auf 30 min gerundet).
    Im Querformat auf dem Smartphone werden Kopf- und Werkzeugleiste ausgeblendet, damit die volle Höhe den Matrixzeilen gehört.
    Legende und Bedienhinweise öffnen sich über das „i“ in der linken oberen Ecke der Matrix.
 4. Zoomen per Pinch (Finger übereinander: Punkte, nebeneinander: Stunden) oder über die Buttons 1×/2×/4×/8×.

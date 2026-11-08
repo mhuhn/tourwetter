@@ -4,7 +4,7 @@
 /* ---------- Reine Logik (auch in Node testbar) ---------- */
 
 const STEP_MIN = 15;          // ein Wetterpunkt alle 15 Minuten Fahrzeit
-const START_COLUMNS = 24;     // Abfahrtszeiten: jetzt … +23 h
+const START_COLUMNS = 48;     // Abfahrtszeiten: jetzt … +47 h
 const LEVELS = [1, 2, 4, 8];
 const HOT_THRESHOLD = 22;     // °C: darüber zählt beim Zusammenfassen das Maximum
 const MAX_LOCATIONS_PER_REQUEST = 50;
