@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <title>Tourwetter</title>
+  <meta name="description" content="Wetter entlang deiner GPX-Route für verschiedene Abfahrtszeiten.">
+  <meta name="theme-color" content="#1F3D2B">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Tourwetter">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="icons/favicon.svg" alt="" width="28" height="28">
+      <div class="brand-text">
+        <h1>Tourwetter</h1>
+        <p id="routeInfo" class="route-info">Keine Route geladen</p>
+      </div>
+    </div>
+    <div class="actions">
+      <button id="pasteBtn" class="btn primary" type="button">GPX einfügen</button>
+      <button id="menuBtn" class="btn icon" type="button" aria-label="Einstellungen" aria-expanded="false" aria-controls="settings">
+        <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" stroke-width="2" stroke-linecap="round" fill="none"/></svg>
+      </button>
+    </div>
+  </header>
+
+  <section id="settings" class="settings" hidden>
+    <label class="field">
+      <span>Ø Geschwindigkeit</span>
+      <span class="input-unit"><input id="speedInput" type="number" inputmode="decimal" min="3" max="60" step="0.5" value="20"> km/h</span>
+    </label>
+    <label class="field file">
+      <span>GPX-Datei öffnen</span>
+      <input id="fileInput" type="file" accept=".gpx,application/gpx+xml,application/xml,text/xml">
+    </label>
+    <button id="reloadBtn" class="btn" type="button">Wetter neu laden</button>
+  </section>
+
+  <div class="toolbar" id="toolbar" hidden>
+    <div class="zoom" role="group" aria-label="Zeilen zusammenfassen">
+      <span class="zoom-label">Punkte</span>
+      <button type="button" data-axis="y" data-level="1">1×</button>
+      <button type="button" data-axis="y" data-level="2">2×</button>
+      <button type="button" data-axis="y" data-level="4">4×</button>
+      <button type="button" data-axis="y" data-level="8">8×</button>
+    </div>
+    <div class="zoom" role="group" aria-label="Stunden zusammenfassen">
+      <span class="zoom-label">Stunden</span>
+      <button type="button" data-axis="x" data-level="1">1×</button>
+      <button type="button" data-axis="x" data-level="2">2×</button>
+      <button type="button" data-axis="x" data-level="4">4×</button>
+      <button type="button" data-axis="x" data-level="8">8×</button>
+    </div>
+    <p class="legend"><span class="lg-t">°C</span> <span class="lg-r">mm/h</span> <span class="lg-w">km/h</span></p>
+  </div>
+
+  <main id="main">
+    <div id="empty" class="empty">
+      <img src="icons/icon.svg" alt="" width="120" height="120" class="empty-icon">
+      <h2>Wetter entlang deiner Tour</h2>
+      <p>Exportiere eine Route aus komoot als GPX, kopiere den Inhalt und füge ihn hier ein.</p>
+      <button id="pasteBtn2" class="btn primary big" type="button">GPX aus Zwischenablage einfügen</button>
+    </div>
+    <p id="status" class="status" role="status" hidden></p>
+    <div id="matrixWrap" class="matrix-wrap" hidden>
+      <table id="matrix" class="matrix"></table>
+    </div>
+  </main>
+
+  <dialog id="pasteDialog" class="paste-dialog">
+    <form method="dialog">
+      <h2>GPX einfügen</h2>
+      <p>Die Zwischenablage konnte nicht direkt gelesen werden. Füge den GPX-Inhalt hier ein (lange tippen › Einsetzen).</p>
+      <textarea id="pasteArea" rows="8" placeholder="&lt;gpx …&gt;"></textarea>
+      <div class="dialog-actions">
+        <button value="cancel" class="btn" type="submit">Abbrechen</button>
+        <button id="pasteOk" value="ok" class="btn primary" type="submit">Übernehmen</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
