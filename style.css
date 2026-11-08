@@ -30,6 +30,8 @@
 
 * { box-sizing: border-box; }
 html, body { height: 100%; }
+/* Seitenhintergrund in der Farbe der Kopfleiste: iOS färbt den Statusleistenbereich danach, kein Verlauf am oberen Rand */
+html { background: #1F3D2B; }
 body {
   margin: 0;
   display: flex;
