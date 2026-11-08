@@ -17,6 +17,49 @@ function childText(el, localName) {
   return '';
 }
 
+/**
+ * GPX-Text aus beliebigem eingefügtem Inhalt herauslösen:
+ * Text drumherum, HTML-maskiertes XML oder Base64 (z. B. aus dem Kurzbefehl „Base64-codieren“).
+ * Liefert den reinen GPX-Text oder null.
+ */
+function extractGpxText(raw) {
+  if (raw == null) return null;
+  let t = String(raw).replace(/^\uFEFF/, '').trim();
+  const cut = str => {
+    const g = str.indexOf('<gpx');
+    if (g < 0) return null;
+    const x = str.lastIndexOf('<?xml', g);
+    const start = x >= 0 ? x : g;
+    const endTag = str.lastIndexOf('</gpx>');
+    return endTag > start ? str.slice(start, endTag + 6) : str.slice(start);
+  };
+  let found = cut(t);
+  if (found) return found;
+  if (/&lt;gpx/i.test(t)) {
+    found = cut(t.replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&amp;/g, '&'));
+    if (found) return found;
+  }
+  // Base64 (auch URL-sicher und mit Zeilenumbrüchen)
+  const b64 = t.replace(/\s+/g, '');
+  if (b64.length >= 40 && /^[A-Za-z0-9+/_-]+=*$/.test(b64)) {
+    try {
+      const norm = b64.replace(/-/g, '+').replace(/_/g, '/');
+      const bin = atob(norm + '==='.slice((norm.length + 3) % 4));
+      const bytes = Uint8Array.from(bin, ch => ch.charCodeAt(0));
+      const decoded = new TextDecoder('utf-8').decode(bytes);
+      found = cut(decoded.replace(/^\uFEFF/, ''));
+      if (found) return found;
+    } catch (e) { /* kein Base64 */ }
+  }
+  return null;
+}
+
+/** Kurze, sichere Vorschau des eingefügten Inhalts für Fehlermeldungen. */
+function pastePreview(raw) {
+  const t = String(raw == null ? '' : raw).replace(/\s+/g, ' ').trim();
+  return '„' + (t.length > 60 ? t.slice(0, 60) + '…' : t) + '“ (' + String(raw || '').length + ' Zeichen)';
+}
+
 function parseGpx(text, DOMParserImpl) {
   const Parser = DOMParserImpl || DOMParser;
   const doc = new Parser().parseFromString(text, 'application/xml');
@@ -430,7 +473,7 @@ function demoRain(pointIndex, timeSec) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { mergeCloseWaypoints, bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, arrivalTime, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
+  module.exports = { extractGpxText, pastePreview, mergeCloseWaypoints, bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, arrivalTime, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
 }
 
 /* ---------- Browser-App ---------- */
@@ -522,10 +565,12 @@ if (typeof document !== 'undefined') (function () {
 
   function loadGpxText(text) {
     try {
-      const route = parseGpx(text.trim());
-      if (text.trim() !== state.gpxText) { state.pauses = {}; savePauses(); }
+      const gpx = extractGpxText(text);
+      if (!gpx) throw new Error('Kein GPX erkannt. Eingefügt wurde ' + pastePreview(text) + '.');
+      const route = parseGpx(gpx);
+      if (gpx !== state.gpxText) { state.pauses = {}; savePauses(); }
       state.editRow = null;
-      state.gpxText = text.trim();
+      state.gpxText = gpx;
       store.set('tw.gpx', state.gpxText);
       state.route = route;
       computeSamples();
@@ -1022,7 +1067,7 @@ if (typeof document !== 'undefined') (function () {
     document.addEventListener('paste', e => {
       if (e.target && (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT')) return;
       const t = e.clipboardData && e.clipboardData.getData('text');
-      if (t && t.includes('<')) { e.preventDefault(); loadGpxText(t); }
+      if (t && extractGpxText(t)) { e.preventDefault(); loadGpxText(t); }
     });
 
     document.querySelectorAll('.zoom button').forEach(b => {

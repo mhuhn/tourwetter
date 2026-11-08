@@ -1,2 +1,2 @@
 /* Wird bei jedem Commit vom pre-commit-Hook (.githooks) aktualisiert. */
-window.TW_VERSION = { committed: '2026-11-08T22:48:30Z' };
+window.TW_VERSION = { committed: '2026-11-08T22:55:20Z' };
