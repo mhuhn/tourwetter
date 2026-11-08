@@ -289,3 +289,13 @@ td.na .vals { display: flex; color: var(--muted); }
 .lg-hint { color: var(--muted); }
 /* Zeile ausgewählt (Zelle angetippt): Wegpunktname vollständig zeigen */
 .matrix tbody th.show .rh-name { -webkit-line-clamp: unset; line-clamp: none; display: block; }
+
+/* Querformat auf dem Smartphone: Kopf- und Werkzeugleiste ausblenden, damit die volle Höhe den Matrixzeilen gehört.
+   Nur mit geladener Matrix – ohne Route bleibt der Kopf mit „GPX einfügen“ sichtbar. */
+@media (orientation: landscape) and (max-height: 540px) {
+  body.has-data { padding-top: 0; padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+  body.has-data .topbar,
+  body.has-data .toolbar,
+  body.has-data .settings { display: none; }
+  body.has-data .footer { padding-top: 3px; padding-bottom: calc(3px + env(safe-area-inset-bottom)); font-size: 11px; }
+}

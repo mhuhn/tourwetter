@@ -16,6 +16,7 @@ PWA, die für eine GPX-Route das Wetter entlang der Strecke für verschiedene Ab
    - **Demo:** Mit `?demo` in der URL wird zusätzlich simulierter Regen in die Daten gemischt.
    - **Zeilen:** Tourpunkte alle 15 min Fahrzeit. Enthält die GPX plausible `<time>`-Angaben, wird die Fahrzeit daraus übernommen; sonst wird mit der Ø-Geschwindigkeit aus dem Menü geschätzt (Standard 20 km/h) und ein Hinweis angezeigt.
    - **Spalten:** Abfahrt jetzt, +1 h, … +23 h (Kopf auf 30 min gerundet).
+   Im Querformat auf dem Smartphone werden Kopf- und Werkzeugleiste ausgeblendet, damit die volle Höhe den Matrixzeilen gehört.
 4. Zoomen per Pinch (Finger übereinander: Punkte, nebeneinander: Stunden) oder über die Buttons 1×/2×/4×/8×.
    Beim Zusammenfassen gilt: liegt das Maximum über 22 °C, wird die höchste Temperatur gezeigt, sonst die niedrigste; Regen und Wind werden gemittelt.
 

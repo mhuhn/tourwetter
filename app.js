@@ -719,6 +719,7 @@ if (typeof document !== 'undefined') (function () {
     $('empty').hidden = hasData || !!state.gpxText;
     $('matrixWrap').hidden = !hasData;
     $('toolbar').hidden = !hasData;
+    document.body.classList.toggle('has-data', hasData);
     updateZoomButtons();
     if (!hasData) return;
 
