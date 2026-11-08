@@ -8,7 +8,8 @@ PWA, die für eine GPX-Route das Wetter entlang der Strecke für verschiedene Ab
 
 1. Route in komoot als GPX exportieren, Inhalt kopieren.
 2. In Tourwetter auf **GPX einfügen** tippen (liest die Zwischenablage; alternativ Datei öffnen im Menü).
-3. Die Matrix zeigt pro Zelle Temperatur (°C), Regen (mm/h) und Wind (km/h).
+3. Die Matrix zeigt pro Zelle: Temperatur als Farbe (unter 20 °C zunehmend blau, über 25 °C zunehmend rot-orange), Regen als diagonale Schraffur und Wind als Pfeil in Windrichtung. Antippen bzw. Hovern blendet für Zeile und Spalte die Zahlen (°C · mm/h · km/h) ein.
+   - **Wegpunkte** (`wpt`) aus der GPX erscheinen als eigene, benannte Zeilen; Regelpunkte näher als 10 min daran entfallen.
    - **Zeilen:** Tourpunkte alle 15 min Fahrzeit. Enthält die GPX plausible `<time>`-Angaben, wird die Fahrzeit daraus übernommen; sonst wird mit der Ø-Geschwindigkeit aus dem Menü geschätzt (Standard 20 km/h) und ein Hinweis angezeigt.
    - **Spalten:** Abfahrt jetzt, +1 h, … +23 h (Kopf auf 30 min gerundet).
 4. Zoomen per Pinch (Finger übereinander: Punkte, nebeneinander: Stunden) oder über die Buttons 1×/2×/4×/8×.

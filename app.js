@@ -8,6 +8,14 @@ const START_COLUMNS = 24;     // Abfahrtszeiten: jetzt … +23 h
 const LEVELS = [1, 2, 4, 8];
 const HOT_THRESHOLD = 22;     // °C: darüber zählt beim Zusammenfassen das Maximum
 const MAX_LOCATIONS_PER_REQUEST = 50;
+const WPT_EXCLUSION_MIN = 10; // Regelpunkte näher als 10 min an einem Wegpunkt entfallen
+
+function childText(el, localName) {
+  for (let c = el.firstChild; c; c = c.nextSibling) {
+    if (c.nodeType === 1 && c.localName === localName) return c.textContent.trim();
+  }
+  return '';
+}
 
 function parseGpx(text, DOMParserImpl) {
   const Parser = DOMParserImpl || DOMParser;
@@ -47,7 +55,35 @@ function parseGpx(text, DOMParserImpl) {
     if (n) name = n.textContent.trim();
   }
   if (points.length < 2) throw new Error('Keine Trackpunkte (trk/trkseg/trkpt) im GPX gefunden.');
-  return { name, points };
+  const waypoints = [];
+  const wpts = doc.getElementsByTagNameNS('*', 'wpt');
+  for (let i = 0; i < wpts.length; i++) {
+    const el = wpts[i];
+    const lat = parseFloat(el.getAttribute('lat'));
+    const lon = parseFloat(el.getAttribute('lon'));
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    const ele = parseFloat(childText(el, 'ele'));
+    waypoints.push({ lat, lon, ele, name: childText(el, 'name') || 'Wegpunkt ' + (waypoints.length + 1) });
+  }
+  return { name, points, waypoints };
+}
+
+/**
+ * Wegpunkte auf die Route abbilden: nächstgelegener Trackpunkt, bei mehreren ähnlich nahen
+ * (z. B. Rundtour) der erste ab dem vorigen Wegpunkt, damit die Reihenfolge stimmt.
+ */
+function locateWaypoints(points, waypoints) {
+  let prev = 0;
+  return waypoints.map(w => {
+    const dists = points.map(p => haversineKm(p, w));
+    let best = 0;
+    for (let i = 1; i < dists.length; i++) if (dists[i] < dists[best]) best = i;
+    const tol = dists[best] + 0.1;
+    let idx = best;
+    for (let i = prev; i < dists.length; i++) { if (dists[i] <= tol) { idx = i; break; } }
+    prev = idx;
+    return { ...w, idx, offRouteKm: dists[idx] };
+  });
 }
 
 function haversineKm(a, b) {
@@ -91,7 +127,7 @@ function gpxTimeline(points, totalKm) {
  * Wetterpunkte alle STEP_MIN Minuten Fahrzeit (plus Zielpunkt).
  * Fahrzeit aus den GPX-Zeiten, falls vorhanden und plausibel, sonst konstante Geschwindigkeit.
  */
-function samplePoints(points, speedKmh, stepMin = STEP_MIN) {
+function samplePoints(points, speedKmh, stepMin = STEP_MIN, waypoints = []) {
   const { cum, totalKm } = routeStats(points);
   const timeline = gpxTimeline(points, totalKm);
   const usesGpxTime = !!timeline;
@@ -118,7 +154,20 @@ function samplePoints(points, speedKmh, stepMin = STEP_MIN) {
       tMin
     });
   }
-  return { samples: out, totalKm, durationMin, hasEle, usesGpxTime };
+  let samples = out;
+  if (waypoints && waypoints.length) {
+    const located = locateWaypoints(points, waypoints).map(w => ({
+      lat: w.lat,
+      lon: w.lon,
+      ele: hasEle ? (Number.isFinite(w.ele) ? w.ele : points[w.idx].ele) : NaN,
+      km: cum[w.idx],
+      tMin: tm[w.idx],
+      name: w.name
+    }));
+    const kept = out.filter(s => located.every(w => Math.abs(s.tMin - w.tMin) >= WPT_EXCLUSION_MIN));
+    samples = kept.concat(located).sort((a, b) => a.tMin - b.tMin || (a.name ? 1 : -1));
+  }
+  return { samples, totalKm, durationMin, hasEle, usesGpxTime };
 }
 
 function buildForecastUrls(samples, hoursNeeded) {
@@ -128,7 +177,7 @@ function buildForecastUrls(samples, hoursNeeded) {
     const params = new URLSearchParams({
       latitude: chunk.map(s => s.lat.toFixed(5)).join(','),
       longitude: chunk.map(s => s.lon.toFixed(5)).join(','),
-      hourly: 'temperature_2m,precipitation,wind_speed_10m',
+      hourly: 'temperature_2m,precipitation,wind_speed_10m,wind_direction_10m',
       wind_speed_unit: 'kmh',
       timeformat: 'unixtime',
       timezone: 'GMT',
@@ -157,8 +206,44 @@ function valueAt(series, ts) {
   const t = series.temperature_2m[iNear];
   const w = series.wind_speed_10m[iNear];
   const r = series.precipitation[iRain];
+  const dirs = series.wind_direction_10m;
+  const d = dirs ? dirs[iNear] : null;
   if (t == null || w == null || r == null) return null;
-  return { t, r, w };
+  return { t, r, w, d: d == null ? null : d };
+}
+
+/** Extremwerte der gesamten (ungezoomten) Matrix für die Farb- und Größenskalen. */
+function matrixExtremes(matrix) {
+  let minT = Infinity, maxT = -Infinity, maxR = 0, maxW = 0;
+  for (const row of matrix.rows) for (const c of row) {
+    if (!c) continue;
+    if (c.t < minT) minT = c.t;
+    if (c.t > maxT) maxT = c.t;
+    if (c.r > maxR) maxR = c.r;
+    if (c.w > maxW) maxW = c.w;
+  }
+  return { minT, maxT, maxR, maxW };
+}
+
+/** Skalen laut Vorgabe: Blau ab < 20 °C, Rot-Orange ab > 25 °C, Regen ≥ 4 mm/h, Wind ≥ 40 km/h als Maximum. */
+function scalesFor(ext) {
+  return {
+    coldRef: Math.min(5, ext.minT),
+    hotRef: Math.max(35, ext.maxT),
+    rainRef: Math.max(4, ext.maxR),
+    windRef: Math.max(40, ext.maxW)
+  };
+}
+
+function cellStyle(c, sc) {
+  const clamp01 = x => Math.max(0, Math.min(1, x));
+  let tone = null, f = 0;
+  if (c.t < 20) { f = clamp01((20 - c.t) / Math.max(0.1, 20 - sc.coldRef)); tone = 'cold'; }
+  else if (c.t > 25) { f = clamp01((c.t - 25) / Math.max(0.1, sc.hotRef - 25)); tone = 'hot'; }
+  const alpha = tone ? 0.08 + 0.84 * f : 0;
+  const rainF = c.r >= 0.05 ? clamp01(c.r / sc.rainRef) : 0;
+  const windF = c.w >= 3 ? clamp01(c.w / sc.windRef) : 0;
+  return { tone, alpha, rainF, windF };
 }
 
 /** Rohmatrix: Zeilen = Tourpunkte, Spalten = Abfahrtszeiten (jetzt + h Stunden). */
@@ -176,10 +261,20 @@ function aggregate(cells) {
   const max = Math.max(...temps);
   const min = Math.min(...temps);
   const mean = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+  // Windrichtung: nach Stärke gewichtetes Vektormittel
+  let u = 0, n = 0;
+  for (const c of v) {
+    if (c.d == null) continue;
+    const rad = c.d * Math.PI / 180;
+    u += Math.sin(rad) * c.w; n += Math.cos(rad) * c.w;
+  }
+  const d = (u === 0 && n === 0) ? (v.find(c => c.d != null) || {}).d ?? null
+    : (Math.atan2(u, n) * 180 / Math.PI + 360) % 360;
   return {
     t: max > HOT_THRESHOLD ? max : min,
     r: mean(v.map(c => c.r)),
-    w: mean(v.map(c => c.w))
+    w: mean(v.map(c => c.w)),
+    d
   };
 }
 
@@ -187,7 +282,9 @@ function aggregate(cells) {
 function zoomMatrix(samples, matrix, zy, zx) {
   const rowGroups = [];
   for (let i = 0; i < samples.length; i += zy) {
-    rowGroups.push({ sample: samples[i], last: samples[Math.min(samples.length, i + zy) - 1], from: i, to: Math.min(samples.length, i + zy) });
+    const to = Math.min(samples.length, i + zy);
+    const wpt = samples.slice(i, to).find(s => s.name) || null;
+    rowGroups.push({ sample: samples[i], wpt, from: i, to });
   }
   const colGroups = [];
   for (let c = 0; c < matrix.starts.length; c += zx) {
@@ -206,7 +303,7 @@ function zoomMatrix(samples, matrix, zy, zx) {
 function roundTo30(sec) { return Math.round(sec / 1800) * 1800; }
 
 if (typeof module !== 'undefined') {
-  module.exports = { parseGpx, haversineKm, routeStats, gpxTimeline, samplePoints, buildForecastUrls, valueAt, buildMatrix, aggregate, zoomMatrix, roundTo30 };
+  module.exports = { parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, samplePoints, buildForecastUrls, valueAt, buildMatrix, matrixExtremes, scalesFor, cellStyle, aggregate, zoomMatrix, roundTo30 };
 }
 
 /* ---------- Browser-App ---------- */
@@ -294,7 +391,7 @@ if (typeof document !== 'undefined') (function () {
   }
 
   function computeSamples() {
-    state.sampled = samplePoints(state.route.points, state.speed);
+    state.sampled = samplePoints(state.route.points, state.speed, STEP_MIN, state.route.waypoints || []);
     const { totalKm, durationMin, usesGpxTime } = state.sampled;
     const stats = routeStats(state.route.points);
     const parts = [];
@@ -346,11 +443,38 @@ if (typeof document !== 'undefined') (function () {
 
   /* ---- Darstellung ---- */
 
-  function tempColor(t) {
-    // −10 °C (blau) … 35 °C (rot), immer helle Töne → dunkler Text bleibt lesbar
-    const f = Math.max(0, Math.min(1, (t + 10) / 45));
-    const hue = 225 - f * 225;
-    return 'hsl(' + hue.toFixed(0) + ', 75%, ' + (88 - Math.abs(f - 0.5) * 6).toFixed(0) + '%)';
+  const COLD_RGB = '23,64,158';   // kräftiges Dunkelblau
+  const HOT_RGB = '201,60,18';    // dunkles Rot-Orange
+
+  function windArrow(d, f) {
+    if (d == null || f <= 0) return '';
+    const size = Math.round(16 + 28 * f);
+    const s = (1.2 + 2.6 * f).toFixed(2);   // halbe Schaftbreite
+    const h = (5 + 3 * f).toFixed(2);       // halbe Kopfbreite
+    const rot = Math.round((d + 180) % 360); // Pfeil zeigt, wohin der Wind weht
+    return '<svg class="wind" width="' + size + '" height="' + size + '" viewBox="-12 -12 24 24" style="transform:translate(-50%,-50%) rotate(' + rot + 'deg)" aria-hidden="true">' +
+      '<polygon points="0,-10.5 ' + h + ',-1.5 ' + s + ',-1.5 ' + s + ',10 -' + s + ',10 -' + s + ',-1.5 -' + h + ',-1.5" fill="#111" stroke="#fff" stroke-width="1.8" stroke-linejoin="round" paint-order="stroke"/></svg>';
+  }
+
+  function cellHtml(c, sc, r, col) {
+    if (!c) return '<td class="na" data-r="' + r + '" data-c="' + col + '"><span class="vals"><b>–</b></span></td>';
+    const st = cellStyle(c, sc);
+    const layers = [];
+    if (st.rainF > 0) {
+      const op = (0.35 + 0.65 * st.rainF).toFixed(2);
+      const w = (1.5 + 3 * st.rainF).toFixed(1);
+      const gap = (Number(w) + 5).toFixed(1);
+      layers.push('repeating-linear-gradient(135deg, rgba(255,255,255,' + op + ') 0 1px, rgba(28,86,196,' + op + ') 1px ' + w + 'px, transparent ' + w + 'px ' + gap + 'px)');
+    }
+    if (st.tone) {
+      const col2 = 'rgba(' + (st.tone === 'cold' ? COLD_RGB : HOT_RGB) + ',' + st.alpha.toFixed(2) + ')';
+      layers.push('linear-gradient(' + col2 + ',' + col2 + ')');
+    }
+    const style = layers.length ? ' style="background-image:' + layers.join(',') + '"' : '';
+    const dark = st.alpha > 0.45 ? ' dark' : '';
+    const rainTxt = c.r < 0.05 ? '0' : fmtNum1.format(c.r);
+    return '<td class="cell' + dark + '" data-r="' + r + '" data-c="' + col + '"' + style + '>' + windArrow(c.d, st.windF) +
+      '<span class="vals"><b>' + Math.round(c.t) + '°</b><i class="vr">' + rainTxt + '</i><i class="vw">' + Math.round(c.w) + '</i></span></td>';
   }
 
   function render() {
@@ -377,25 +501,65 @@ if (typeof document !== 'undefined') (function () {
     });
     html += '</tr></thead><tbody>';
 
+    const sc = scalesFor(matrixExtremes(matrix));
     z.rowGroups.forEach((rg, r) => {
       const s = rg.sample;
       const meta = [fmtNum1.format(s.km) + ' km'];
       if (Number.isFinite(s.ele)) meta.push(Math.round(s.ele) + ' m');
-      html += '<tr><th scope="row"><span class="rh-time">+' + fmtDuration(s.tMin) + '</span><span class="rh-meta">' + meta.join(' · ') + '</span></th>';
-      z.cells[r].forEach(c => {
-        if (!c) { html += '<td class="na"><span class="c-t">–</span></td>'; return; }
-        const rain = c.r;
-        const bar = rain >= 0.05 ? Math.min(7, 2 + rain * 2) : 0;
-        const style = 'background:' + tempColor(c.t) + (bar ? ';box-shadow:inset 0 -' + bar.toFixed(0) + 'px 0 rgba(47,111,208,.55)' : '');
-        const rainTxt = rain < 0.05 ? '0' : fmtNum1.format(rain);
-        html += '<td style="' + style + '"><span class="c-t">' + Math.round(c.t) + '°</span>' +
-          '<span class="c-r' + (rain >= 0.05 ? ' wet' : '') + '">' + rainTxt + '</span>' +
-          '<span class="c-w' + (c.w >= 30 ? ' strong' : '') + '">' + Math.round(c.w) + '</span></td>';
-      });
+      if (rg.wpt) {
+        const w = rg.wpt;
+        html += '<tr class="wpt-row"><th scope="row" title="' + esc(w.name) + '"><span class="rh-name">' + esc(w.name) + '</span>' +
+          '<span class="rh-meta">+' + fmtDuration(w.tMin) + ' · ' + fmtNum1.format(w.km) + ' km</span></th>';
+      } else {
+        html += '<tr><th scope="row"><span class="rh-time">+' + fmtDuration(s.tMin) + '</span><span class="rh-meta">' + meta.join(' · ') + '</span></th>';
+      }
+      z.cells[r].forEach((c, col) => { html += cellHtml(c, sc, r, col); });
       html += '</tr>';
     });
     html += '</tbody>';
     $('matrix').innerHTML = html;
+    state.sel = null;
+    state.hover = null;
+  }
+
+  /* ---- Werte für Zeile + Spalte einblenden (Hover / Tippen) ---- */
+
+  function applySelection() {
+    const table = $('matrix');
+    table.querySelectorAll('.show').forEach(el => el.classList.remove('show'));
+    const cur = state.sel || state.hover;
+    if (!cur) return;
+    const row = table.tBodies[0] && table.tBodies[0].rows[cur.r];
+    if (row) row.querySelectorAll('td, th').forEach(el => el.classList.add('show'));
+    table.querySelectorAll('td[data-c="' + cur.c + '"]').forEach(el => el.classList.add('show'));
+    const head = table.tHead && table.tHead.rows[0].cells[cur.c + 1];
+    if (head) head.classList.add('show');
+  }
+
+  function setupSelection() {
+    const table = $('matrix');
+    const cellOf = e => {
+      const td = e.target.closest && e.target.closest('td[data-r]');
+      return td ? { r: +td.dataset.r, c: +td.dataset.c } : null;
+    };
+    table.addEventListener('click', e => {
+      const p = cellOf(e);
+      if (!p) return;
+      state.sel = (state.sel && state.sel.r === p.r && state.sel.c === p.c) ? null : p;
+      applySelection();
+    });
+    table.addEventListener('pointerover', e => {
+      if (e.pointerType !== 'mouse') return;
+      const p = cellOf(e);
+      if (!p || (state.hover && state.hover.r === p.r && state.hover.c === p.c)) return;
+      state.hover = p;
+      if (!state.sel) applySelection();
+    });
+    table.addEventListener('pointerleave', e => {
+      if (e.pointerType !== 'mouse') return;
+      state.hover = null;
+      if (!state.sel) applySelection();
+    });
   }
 
   /* ---- Zoom ---- */
@@ -538,6 +702,7 @@ if (typeof document !== 'undefined') (function () {
     setInterval(() => { if (document.visibilityState === 'visible' && state.weather && !state.loading) render(); }, 5 * 60 * 1000);
 
     setupPinch();
+    setupSelection();
 
     updateVersionInfo();
     setInterval(updateVersionInfo, 30 * 1000);
