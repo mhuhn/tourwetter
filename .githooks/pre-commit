@@ -1,0 +1,6 @@
+#!/bin/sh
+# Schreibt den Commit-Zeitpunkt in version.js, damit die App ihr Alter anzeigen kann.
+root=$(git rev-parse --show-toplevel)
+now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+printf "/* Wird bei jedem Commit vom pre-commit-Hook (.githooks) aktualisiert. */\nwindow.TW_VERSION = { committed: '%s' };\n" "$now" > "$root/version.js"
+git add "$root/version.js"

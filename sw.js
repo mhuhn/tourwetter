@@ -1,10 +1,11 @@
 /* Tourwetter Service Worker: App-Dateien offline, Wetterdaten immer frisch */
-const CACHE = 'tourwetter-v2';
+const CACHE = 'tourwetter-v3';
 const ASSETS = [
   './',
   'index.html',
   'style.css',
   'app.js',
+  'version.js',
   'manifest.webmanifest',
   'icons/icon.svg',
   'icons/favicon.svg',
@@ -32,14 +33,19 @@ self.addEventListener('fetch', event => {
   const url = new URL(req.url);
   if (url.origin !== self.location.origin) return; // Open-Meteo direkt aus dem Netz
 
-  // Stale-while-revalidate für die App-Dateien
+  // Erst Netz (max. 3 s), dann Cache: online immer der aktuelle Stand, offline der zuletzt geladene
   event.respondWith(
     caches.open(CACHE).then(async cache => {
-      const cached = await cache.match(req, { ignoreSearch: true });
-      const network = fetch(req).then(res => {
+      const network = fetch(req, { cache: 'no-cache' }).then(res => {
         if (res && res.ok) cache.put(req, res.clone());
         return res;
-      }).catch(() => cached);
+      });
+      const timeout = new Promise(resolve => setTimeout(resolve, 3000));
+      try {
+        const res = await Promise.race([network, timeout]);
+        if (res) return res;
+      } catch (e) { /* offline */ }
+      const cached = await cache.match(req, { ignoreSearch: true });
       return cached || network;
     })
   );

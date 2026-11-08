@@ -149,8 +149,19 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; position: 
   -webkit-overflow-scrolling: touch;
   touch-action: pan-x pan-y;
   overscroll-behavior: contain;
-  padding-bottom: env(safe-area-inset-bottom);
 }
+
+.footer {
+  flex: none;
+  padding: 6px 16px calc(6px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: var(--paper);
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+.footer .fresh { color: #2E7D46; font-weight: 600; }
+@media (prefers-color-scheme: dark) { .footer .fresh { color: #7FD69A; } }
 .matrix-wrap[hidden] { display: none; }
 
 .matrix { border-collapse: separate; border-spacing: 0; font-variant-numeric: tabular-nums; }

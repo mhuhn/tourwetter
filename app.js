@@ -460,6 +460,27 @@ if (typeof document !== 'undefined') (function () {
     ['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), { passive: false }));
   }
 
+  /* ---- Alter des Code-Stands ---- */
+
+  function formatAge(minutes) {
+    if (minutes < 1) return 'vor weniger als 1 min';
+    if (minutes < 120) return 'vor ' + minutes + ' min';
+    const h = Math.floor(minutes / 60);
+    if (h < 48) return 'vor ' + h + ' h ' + (minutes % 60) + ' min';
+    return 'vor ' + Math.floor(h / 24) + ' Tagen';
+  }
+
+  function updateVersionInfo() {
+    const el = $('versionInfo');
+    const v = window.TW_VERSION;
+    const ms = v && Date.parse(v.committed);
+    if (!Number.isFinite(ms)) { el.textContent = 'Stand unbekannt'; return; }
+    const minutes = Math.max(0, Math.floor((Date.now() - ms) / 60000));
+    const d = new Date(ms);
+    el.innerHTML = 'Letzter Commit <span' + (minutes < 60 ? ' class="fresh"' : '') + '>' + formatAge(minutes) + '</span> · ' +
+      d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' + fmtTime.format(d);
+  }
+
   /* ---- Ereignisse ---- */
 
   function init() {
@@ -517,6 +538,10 @@ if (typeof document !== 'undefined') (function () {
     setInterval(() => { if (document.visibilityState === 'visible' && state.weather && !state.loading) render(); }, 5 * 60 * 1000);
 
     setupPinch();
+
+    updateVersionInfo();
+    setInterval(updateVersionInfo, 30 * 1000);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') updateVersionInfo(); });
 
     if (state.gpxText) loadGpxText(state.gpxText);
     else render();
