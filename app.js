@@ -746,7 +746,8 @@ if (typeof document !== 'undefined') (function () {
       if (h > 0 || (editable && state.editCol === nextAt)) display.push({ kind: 'pause', at: nextAt, h, editable });
     });
 
-    let html = '<thead><tr><th class="corner" scope="col">Fahrzeit · km · Höhe<br>Abfahrt →</th>';
+    let html = '<thead><tr><th class="corner" scope="col">Fahrzeit · km · Höhe<br>' +
+      '<button type="button" class="info-btn" aria-label="Legende anzeigen" aria-haspopup="dialog">i</button>Abfahrt →</th>';
     let lastDay = fmtDay.format(new Date(nowSec * 1000));
     display.forEach(dc => {
       if (dc.kind === 'pause') {
@@ -865,6 +866,8 @@ if (typeof document !== 'undefined') (function () {
       return td ? { r: +td.dataset.r, c: +td.dataset.c } : null;
     };
     table.addEventListener('click', e => {
+      const info = e.target.closest && e.target.closest('.info-btn');
+      if (info) { e.stopPropagation(); toggleLegend(info); return; }
       const btn = e.target.closest && e.target.closest('button[data-pause]');
       if (btn) { changePause(+btn.dataset.pause, +btn.dataset.delta); return; }
       const cbtn = e.target.closest && e.target.closest('button[data-cpause]');
@@ -890,6 +893,34 @@ if (typeof document !== 'undefined') (function () {
       state.hover = null;
       if (!state.sel) applySelection();
     });
+  }
+
+  /* ---- Legende (Infofeld) ---- */
+
+  function toggleLegend(anchor) {
+    const pop = $('legendPop');
+    if (!pop.hidden) { pop.hidden = true; return; }
+    // Hinweise (geschätzte Zeiten, Demo) auch hier zeigen – im Querformat ist die Werkzeugleiste ausgeblendet
+    const notes = [$('estNote'), $('demoNote')].filter(n => !n.hidden).map(n => n.textContent);
+    $('lpNotes').textContent = notes.join(' · ');
+    $('lpNotes').hidden = !notes.length;
+    pop.hidden = false;
+    const r = anchor.getBoundingClientRect();
+    const w = pop.offsetWidth, hgt = pop.offsetHeight;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - w - 8));
+    let top = r.bottom + 6;
+    if (top + hgt > window.innerHeight - 8) top = Math.max(8, window.innerHeight - hgt - 8);
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+  }
+
+  function setupLegend() {
+    $('legendClose').addEventListener('click', () => { $('legendPop').hidden = true; });
+    document.addEventListener('click', e => {
+      const pop = $('legendPop');
+      if (!pop.hidden && !pop.contains(e.target) && !(e.target.closest && e.target.closest('.info-btn'))) pop.hidden = true;
+    });
+    window.addEventListener('resize', () => { $('legendPop').hidden = true; });
   }
 
   /* ---- Pausen ---- */
@@ -1104,6 +1135,7 @@ if (typeof document !== 'undefined') (function () {
 
     setupPinch();
     setupSelection();
+    setupLegend();
 
     updateVersionInfo();
     setInterval(updateVersionInfo, 30 * 1000);

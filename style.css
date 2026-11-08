@@ -299,3 +299,33 @@ td.na .vals { display: flex; color: var(--muted); }
   body.has-data .settings { display: none; }
   body.has-data .footer { padding-top: 3px; padding-bottom: calc(3px + env(safe-area-inset-bottom)); font-size: 11px; }
 }
+
+/* Kompakter Einfüge-Button in der Kopfleiste (Schriftzug bleibt frei) */
+.btn.compact { display: inline-flex; align-items: center; gap: 6px; padding: 0 12px; }
+
+/* Info-Knopf in der Tabellenecke und Legenden-Infofeld */
+.matrix thead th.corner { position: sticky; }
+.info-btn {
+  position: relative; display: inline-block; vertical-align: -3px; margin-right: 6px;
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 1.5px solid var(--green-2); background: var(--card); color: var(--green-2);
+  font: italic 700 11px/1 Georgia, "Times New Roman", serif; cursor: pointer; padding: 0;
+}
+.info-btn::after { content: ""; position: absolute; inset: -10px; } /* größere Tippfläche */
+@media (prefers-color-scheme: dark) { .info-btn { border-color: #9FD8B0; color: #9FD8B0; } }
+.legend-pop {
+  position: fixed; z-index: 50; width: min(320px, calc(100vw - 16px));
+  max-height: calc(100vh - 16px); overflow: auto;
+  background: var(--card); color: var(--ink);
+  border: 1px solid var(--line); border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.18);
+  padding: 10px 14px 12px; font-size: 13px;
+}
+.legend-pop[hidden] { display: none; }
+.lp-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.lp-close { font: inherit; font-size: 22px; line-height: 1; width: 36px; height: 36px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.lp-notes { margin: 0 0 8px; color: #9A4A12; font-weight: 600; font-size: 12px; }
+.lp-notes[hidden] { display: none; }
+.lp-list, .lp-hints { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.lp-hints { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.lp-list li { display: flex; align-items: center; }
