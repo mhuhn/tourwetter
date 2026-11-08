@@ -536,13 +536,21 @@ if (typeof document !== 'undefined') (function () {
 
   /* ---- Wetter laden ---- */
 
-  async function fetchWeather() {
+  const PAUSE_HEADROOM_H = 12; // Reserve, damit neue Pausen meist ohne Nachladen auskommen
+
+  function hoursRequired() {
+    return START_COLUMNS + Math.ceil(state.sampled.durationMin / 60) + totalPauseHours() + 2;
+  }
+
+  // silent: ohne Statuszeile (kein Verrutschen der Matrix bei Hintergrund-Aktualisierung)
+  async function fetchWeather(opts) {
     if (!state.sampled) return;
-    const { samples, durationMin } = state.sampled;
-    const hoursNeeded = START_COLUMNS + Math.ceil(durationMin / 60) + totalPauseHours() + 2;
+    const silent = !!(opts && opts.silent) && !!state.weather;
+    const { samples } = state.sampled;
+    const hoursNeeded = hoursRequired() + PAUSE_HEADROOM_H;
     const urls = buildForecastUrls(samples, hoursNeeded);
     state.loading = true;
-    setStatus('Lade Wetter für ' + samples.length + ' Punkte …');
+    if (!silent) setStatus('Lade Wetter für ' + samples.length + ' Punkte …');
     try {
       const results = [];
       for (const url of urls) {
@@ -565,8 +573,8 @@ if (typeof document !== 'undefined') (function () {
       state.weather = results;
       state.fetchedAt = Date.now();
       state.fetchedHours = hoursNeeded;
-      setStatus('');
-      render();
+      if (!silent) setStatus('');
+      if (silent) rerenderKeepScroll(); else render();
     } catch (e) {
       const offline = !navigator.onLine;
       setStatus(offline ? 'Keine Internetverbindung – Wetter konnte nicht geladen werden.' : (e.message || String(e)), true);
@@ -580,6 +588,12 @@ if (typeof document !== 'undefined') (function () {
   // Wind relativ zur Fahrtrichtung in zwei Keilen:
   // oben = Gegenwind, unten = Rückenwind, rechts/links = Seitenwind von rechts/links.
   // Größe je Anteil (km/h) bis zum Maximum; Anteile unter 3 km/h werden nicht gezeigt.
+  const HEAD_WEAK = [150, 95, 88], HEAD_STRONG = [222, 30, 20];
+  const TAIL_WEAK = [84, 130, 96], TAIL_STRONG = [20, 165, 70];
+  function mixRgb(a, b, f) {
+    return 'rgb(' + a.map((v, i) => Math.round(v + (b[i] - v) * f)).join(',') + ')';
+  }
+
   function windWedges(c, sc) {
     if (c.hw == null || c.cw == null) return '';
     const wedge = (comp, sideA, sideB) => {
@@ -588,8 +602,11 @@ if (typeof document !== 'undefined') (function () {
       const f = Math.max(0, Math.min(1, mag / sc.windRef));
       const half = 4 + 18 * f, len = 6 + 25 * f;
       const rot = comp > 0 ? sideA : sideB;
+      // Gegenwind rötlich, Rückenwind grünlich (kräftiger bei mehr Wind), Seitenwind schwarz
+      let fill = '#111';
+      if (sideA === 0) fill = comp > 0 ? mixRgb(HEAD_WEAK, HEAD_STRONG, f) : mixRgb(TAIL_WEAK, TAIL_STRONG, f);
       return '<polygon points="' + (-half).toFixed(1) + ',-34 ' + half.toFixed(1) + ',-34 0,' + (-34 + len).toFixed(1) +
-        '" transform="rotate(' + rot + ')" fill="#111" stroke="#fff" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke"/>';
+        '" transform="rotate(' + rot + ')" fill="' + fill + '" stroke="#fff" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke"/>';
     };
     const shapes = wedge(c.hw, 0, 180) + wedge(c.cw, 90, 270);
     if (!shapes) return '';
@@ -857,12 +874,8 @@ if (typeof document !== 'undefined') (function () {
 
   function afterPauseChange() {
     savePauses();
-    const needed = START_COLUMNS + Math.ceil(state.sampled.durationMin / 60) + totalPauseHours() + 2;
-    if (needed > state.fetchedHours) {
-      const wrap = $('matrixWrap');
-      const top = wrap.scrollTop, left = wrap.scrollLeft;
-      fetchWeather().then(() => { wrap.scrollTop = top; wrap.scrollLeft = left; });
-    } else rerenderKeepScroll();
+    rerenderKeepScroll(); // sofort anzeigen; fehlende Stunden ggf. still nachladen
+    if (hoursRequired() > state.fetchedHours && !state.loading) fetchWeather({ silent: true });
   }
 
   /* ---- Zoom ---- */
@@ -1000,7 +1013,7 @@ if (typeof document !== 'undefined') (function () {
     // Beim Zurückkehren: Spalten neu ausrichten, nach 30 min Wetter neu laden
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState !== 'visible' || !state.route) return;
-      if (Date.now() - state.fetchedAt > 30 * 60 * 1000) fetchWeather(); else render();
+      if (Date.now() - state.fetchedAt > 30 * 60 * 1000) fetchWeather({ silent: true }); else render();
     });
     setInterval(() => { if (document.visibilityState === 'visible' && state.weather && !state.loading) render(); }, 5 * 60 * 1000);
 
