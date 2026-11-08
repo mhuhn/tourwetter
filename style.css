@@ -252,7 +252,16 @@ td.na .vals { display: flex; color: var(--muted); }
 .matrix th.show { color: var(--orange); }
 
 .wpt-row th { background: var(--sticky-bg); }
-.rh-name { display: block; font-size: 13px; font-weight: 800; color: var(--green-2); overflow: hidden; text-overflow: ellipsis; }
+/* Lange Wegpunktnamen umbrechen (mit Silbentrennung) statt früh abschneiden; erst nach mehreren Zeilen „…“ */
+.matrix tbody th { white-space: normal; }
+.rh-name {
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+  font-size: 13px; line-height: 1.15; font-weight: 800; color: var(--green-2);
+  hyphens: auto; -webkit-hyphens: auto; overflow-wrap: anywhere; white-space: normal;
+}
+.rh-name.long { font-size: 11.5px; }
+.rh-name.xlong { font-size: 11px; -webkit-line-clamp: 4; line-clamp: 4; }
+.rh-time, .rh-meta { white-space: nowrap; }
 .rh-name::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: var(--orange); vertical-align: 1px; }
 @media (prefers-color-scheme: dark) { .rh-name { color: #9FD8B0; } }
 
@@ -264,3 +273,5 @@ td.na .vals { display: flex; color: var(--muted); }
 .lg-rain { width: 14px; }
 .lg-rain { background-color: var(--card); background-image: repeating-linear-gradient(135deg, rgba(28, 86, 196, 0.9) 0 3px, transparent 3px 7px); }
 .lg-hint { color: var(--muted); }
+/* Zeile ausgewählt (Zelle angetippt): Wegpunktname vollständig zeigen */
+.matrix tbody th.show .rh-name { -webkit-line-clamp: unset; line-clamp: none; display: block; }

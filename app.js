@@ -128,6 +128,23 @@ function routeStats(points) {
   return { cum, totalKm: cum[cum.length - 1], ascent: Math.round(ascent) };
 }
 
+/**
+ * Wegpunkte, die weniger als 10 min auseinander liegen, zu einer Zeile zusammenfassen:
+ * Werte des ersten (bei mehr als zwei: des mittleren), Namen mit „ / “ verbunden.
+ */
+function mergeCloseWaypoints(wpts) {
+  const sorted = wpts.slice().sort((a, b) => a.tMin - b.tMin);
+  const groups = [];
+  for (const w of sorted) {
+    const g = groups[groups.length - 1];
+    if (g && w.tMin - g[g.length - 1].tMin < WPT_EXCLUSION_MIN) g.push(w); else groups.push([w]);
+  }
+  return groups.map(g => {
+    const rep = g.length <= 2 ? g[0] : g[Math.floor((g.length - 1) / 2)];
+    return { ...rep, name: g.map(w => w.name).join(' / ') };
+  });
+}
+
 /** Fahrzeit (Minuten seit Start) je Trackpunkt aus den GPX-Zeiten, oder null, wenn unbrauchbar. */
 function gpxTimeline(points, totalKm) {
   if (!points.every(p => Number.isFinite(p.time))) return null;
@@ -186,7 +203,7 @@ function samplePoints(points, speedKmh, stepMin = STEP_MIN, waypoints = []) {
       name: w.name
     }));
     const kept = out.filter(s => located.every(w => Math.abs(s.tMin - w.tMin) >= WPT_EXCLUSION_MIN));
-    samples = kept.concat(located).sort((a, b) => a.tMin - b.tMin || (a.name ? 1 : -1));
+    samples = kept.concat(mergeCloseWaypoints(located)).sort((a, b) => a.tMin - b.tMin || (a.name ? 1 : -1));
   }
   return { samples: withBearings(samples), totalKm, durationMin, hasEle, usesGpxTime };
 }
@@ -413,7 +430,7 @@ function demoRain(pointIndex, timeSec) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, arrivalTime, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
+  module.exports = { mergeCloseWaypoints, bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, arrivalTime, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
 }
 
 /* ---------- Browser-App ---------- */
@@ -714,7 +731,9 @@ if (typeof document !== 'undefined') (function () {
       const rowAttr = ' data-row="' + r + '"' + (rp.editable ? ' data-point="' + rg.from + '"' : '');
       if (rg.wpt) {
         const w = rg.wpt;
-        html += '<tr class="wpt-row"><th scope="row"' + rowAttr + ' title="' + esc(w.name) + '"><span class="rh-name">' + esc(w.name) + '</span>' +
+        const len = w.name.length;
+        const nameCls = len > 44 ? ' xlong' : len > 22 ? ' long' : '';
+        html += '<tr class="wpt-row"><th scope="row"' + rowAttr + ' title="' + esc(w.name) + '"><span class="rh-name' + nameCls + '" lang="de">' + esc(w.name) + '</span>' +
           '<span class="rh-meta">+' + fmtDuration(w.tEff) + ' · ' + fmtNum1.format(w.km) + ' km</span></th>';
       } else {
         html += '<tr><th scope="row"' + rowAttr + '><span class="rh-time">+' + fmtDuration(s.tEff) + '</span><span class="rh-meta">' + meta.join(' · ') + '</span></th>';
