@@ -62,6 +62,8 @@ function parseGpx(text, DOMParserImpl) {
     const lat = parseFloat(el.getAttribute('lat'));
     const lon = parseFloat(el.getAttribute('lon'));
     if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+    // Nur Wegpunkte mit Flaggen-Symbol (<sym>Flag…</sym>)
+    if (!/^flag/i.test(childText(el, 'sym'))) continue;
     const ele = parseFloat(childText(el, 'ele'));
     waypoints.push({ lat, lon, ele, name: childText(el, 'name') || 'Wegpunkt ' + (waypoints.length + 1) });
   }
@@ -250,7 +252,8 @@ function cellStyle(c, sc) {
 function buildMatrix(samples, weather, nowSec, columns = START_COLUMNS) {
   const starts = [];
   for (let h = 0; h < columns; h++) starts.push(nowSec + h * 3600);
-  const rows = samples.map((s, i) => starts.map(st => valueAt(weather[i], st + s.tMin * 60)));
+  // tEff = Fahrzeit inkl. vorher eingelegter Pausen
+  const rows = samples.map((s, i) => starts.map(st => valueAt(weather[i], st + (s.tEff != null ? s.tEff : s.tMin) * 60)));
   return { starts, rows };
 }
 
@@ -302,8 +305,29 @@ function zoomMatrix(samples, matrix, zy, zx) {
 
 function roundTo30(sec) { return Math.round(sec / 1800) * 1800; }
 
+/** Pausen (Stunden nach Punkt i) aufsummieren: liefert Samples mit tEff (Minuten inkl. Pausen). */
+function applyPauses(samples, pauses) {
+  let extra = 0;
+  return samples.map((s, i) => {
+    const out = { ...s, tEff: s.tMin + extra * 60 };
+    extra += (pauses && pauses[i]) || 0;
+    return out;
+  });
+}
+
+/** Demo-Regen: wandernde Schauerbänder, unabhängig von der echten Prognose. */
+function demoRain(pointIndex, timeSec) {
+  const hour = Math.floor(timeSec / 3600);
+  const x = ((hour + pointIndex * 0.35) % 11 + 11) % 11;
+  if (x < 1) return 0.3;
+  if (x < 2) return 1.6;
+  if (x < 3) return 4.5 + (pointIndex % 3);
+  if (x < 4) return 0.8;
+  return 0;
+}
+
 if (typeof module !== 'undefined') {
-  module.exports = { parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, samplePoints, buildForecastUrls, valueAt, buildMatrix, matrixExtremes, scalesFor, cellStyle, aggregate, zoomMatrix, roundTo30 };
+  module.exports = { parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, buildMatrix, matrixExtremes, scalesFor, cellStyle, aggregate, zoomMatrix, roundTo30 };
 }
 
 /* ---------- Browser-App ---------- */
@@ -324,8 +348,17 @@ if (typeof document !== 'undefined') (function () {
     fetchedAt: 0,
     zy: parseInt(store.get('tw.zy', '1'), 10) || 1,
     zx: parseInt(store.get('tw.zx', '1'), 10) || 1,
-    loading: false
+    loading: false,
+    fetchedHours: 0,
+    pauses: (() => { try { return JSON.parse(store.get('tw.pauses', '{}')) || {}; } catch (e) { return {}; } })(),
+    editRow: null,     // Index des Punkts, dessen Pausen-Editor offen ist
+    demo: new URLSearchParams(location.search).has('demo')
   };
+
+  function totalPauseHours() {
+    return Object.values(state.pauses).reduce((a, b) => a + (b || 0), 0);
+  }
+  function savePauses() { store.set('tw.pauses', JSON.stringify(state.pauses)); }
 
   const fmtTime = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
   const fmtDay = new Intl.DateTimeFormat('de-DE', { weekday: 'short' });
@@ -380,6 +413,8 @@ if (typeof document !== 'undefined') (function () {
   function loadGpxText(text) {
     try {
       const route = parseGpx(text.trim());
+      if (text.trim() !== state.gpxText) { state.pauses = {}; savePauses(); }
+      state.editRow = null;
       state.gpxText = text.trim();
       store.set('tw.gpx', state.gpxText);
       state.route = route;
@@ -411,7 +446,7 @@ if (typeof document !== 'undefined') (function () {
   async function fetchWeather() {
     if (!state.sampled) return;
     const { samples, durationMin } = state.sampled;
-    const hoursNeeded = START_COLUMNS + Math.ceil(durationMin / 60) + 2;
+    const hoursNeeded = START_COLUMNS + Math.ceil(durationMin / 60) + totalPauseHours() + 2;
     const urls = buildForecastUrls(samples, hoursNeeded);
     state.loading = true;
     setStatus('Lade Wetter für ' + samples.length + ' Punkte …');
@@ -429,8 +464,14 @@ if (typeof document !== 'undefined') (function () {
         for (const d of arr) results.push(d.hourly);
       }
       if (results.length !== samples.length) throw new Error('Unerwartete Antwort von Open-Meteo.');
+      if (state.demo) {
+        results.forEach((h, i) => {
+          h.precipitation = h.precipitation.map((r, k) => Math.max(r || 0, demoRain(i, h.time[k])));
+        });
+      }
       state.weather = results;
       state.fetchedAt = Date.now();
+      state.fetchedHours = hoursNeeded;
       setStatus('');
       render();
     } catch (e) {
@@ -446,14 +487,13 @@ if (typeof document !== 'undefined') (function () {
   const COLD_RGB = '23,64,158';   // kräftiges Dunkelblau
   const HOT_RGB = '201,60,18';    // dunkles Rot-Orange
 
-  function windArrow(d, f) {
-    if (d == null || f <= 0) return '';
-    const size = Math.round(16 + 28 * f);
-    const s = (1.2 + 2.6 * f).toFixed(2);   // halbe Schaftbreite
-    const h = (5 + 3 * f).toFixed(2);       // halbe Kopfbreite
-    const rot = Math.round((d + 180) % 360); // Pfeil zeigt, wohin der Wind weht
-    return '<svg class="wind" width="' + size + '" height="' + size + '" viewBox="-12 -12 24 24" style="transform:translate(-50%,-50%) rotate(' + rot + 'deg)" aria-hidden="true">' +
-      '<polygon points="0,-10.5 ' + h + ',-1.5 ' + s + ',-1.5 ' + s + ',10 -' + s + ',10 -' + s + ',-1.5 -' + h + ',-1.5" fill="#111" stroke="#fff" stroke-width="1.8" stroke-linejoin="round" paint-order="stroke"/></svg>';
+  // Windkeil: Dreieck vom oberen Zellrand Richtung Mitte, breiter und länger bei mehr Wind
+  function windWedge(f) {
+    if (f <= 0) return '';
+    const half = (4 + 18 * f).toFixed(1);    // halbe Basisbreite am Rand
+    const apex = (6 + 25 * f).toFixed(1);    // Spitze, bei Maximum in der Zellmitte
+    return '<svg class="wind" width="48" height="34" viewBox="-24 0 48 34" aria-hidden="true">' +
+      '<polygon points="-' + half + ',0 ' + half + ',0 0,' + apex + '" fill="#111" stroke="#fff" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke"/></svg>';
   }
 
   function cellHtml(c, sc, r, col) {
@@ -473,7 +513,7 @@ if (typeof document !== 'undefined') (function () {
     const style = layers.length ? ' style="background-image:' + layers.join(',') + '"' : '';
     const dark = st.alpha > 0.45 ? ' dark' : '';
     const rainTxt = c.r < 0.05 ? '0' : fmtNum1.format(c.r);
-    return '<td class="cell' + dark + '" data-r="' + r + '" data-c="' + col + '"' + style + '>' + windArrow(c.d, st.windF) +
+    return '<td class="cell' + dark + '" data-r="' + r + '" data-c="' + col + '"' + style + '>' + windWedge(st.windF) +
       '<span class="vals"><b>' + Math.round(c.t) + '°</b><i class="vr">' + rainTxt + '</i><i class="vw">' + Math.round(c.w) + '</i></span></td>';
   }
 
@@ -486,8 +526,9 @@ if (typeof document !== 'undefined') (function () {
     if (!hasData) return;
 
     const nowSec = Date.now() / 1000;
-    const { samples } = state.sampled;
+    const samples = applyPauses(state.sampled.samples, state.pauses);
     const matrix = buildMatrix(samples, state.weather, nowSec);
+    $('demoNote').hidden = !state.demo;
     const z = zoomMatrix(samples, matrix, state.zy, state.zx);
 
     let html = '<thead><tr><th class="corner" scope="col">Fahrzeit · km · Höhe<br>Abfahrt →</th>';
@@ -502,19 +543,40 @@ if (typeof document !== 'undefined') (function () {
     html += '</tr></thead><tbody>';
 
     const sc = scalesFor(matrixExtremes(matrix));
+    const nCols = z.colGroups.length;
+    const lastIdx = samples.length - 1;
     z.rowGroups.forEach((rg, r) => {
       const s = rg.sample;
       const meta = [fmtNum1.format(s.km) + ' km'];
       if (Number.isFinite(s.ele)) meta.push(Math.round(s.ele) + ' m');
+      // Bei 1×-Zoom gehört die Zeile genau zu einem Punkt → Pausen dort bearbeitbar
+      const editable = state.zy === 1 && rg.from < lastIdx;
+      const rowAttr = ' data-row="' + r + '"' + (editable ? ' data-point="' + rg.from + '"' : '');
       if (rg.wpt) {
         const w = rg.wpt;
-        html += '<tr class="wpt-row"><th scope="row" title="' + esc(w.name) + '"><span class="rh-name">' + esc(w.name) + '</span>' +
-          '<span class="rh-meta">+' + fmtDuration(w.tMin) + ' · ' + fmtNum1.format(w.km) + ' km</span></th>';
+        html += '<tr class="wpt-row"><th scope="row"' + rowAttr + ' title="' + esc(w.name) + '"><span class="rh-name">' + esc(w.name) + '</span>' +
+          '<span class="rh-meta">+' + fmtDuration(w.tEff) + ' · ' + fmtNum1.format(w.km) + ' km</span></th>';
       } else {
-        html += '<tr><th scope="row"><span class="rh-time">+' + fmtDuration(s.tMin) + '</span><span class="rh-meta">' + meta.join(' · ') + '</span></th>';
+        html += '<tr><th scope="row"' + rowAttr + '><span class="rh-time">+' + fmtDuration(s.tEff) + '</span><span class="rh-meta">' + meta.join(' · ') + '</span></th>';
       }
       z.cells[r].forEach((c, col) => { html += cellHtml(c, sc, r, col); });
       html += '</tr>';
+
+      // Pausen nach dieser Zeile (bzw. Gruppe)
+      let pause = 0;
+      for (let i = rg.from; i < rg.to && i < lastIdx; i++) pause += state.pauses[i] || 0;
+      const editing = editable && state.editRow === rg.from;
+      if (pause > 0 || editing) {
+        html += '<tr class="pause-row"><th scope="row">';
+        if (editable) {
+          html += '<span class="pause-ctl"><button type="button" class="pbtn" data-pause="' + rg.from + '" data-delta="-1" aria-label="Pause um 1 Stunde kürzen"' + (pause ? '' : ' disabled') + '>−</button>' +
+            '<span class="pause-txt">' + (pause ? 'Pause ' + pause + ' h' : 'Pause') + '</span>' +
+            '<button type="button" class="pbtn" data-pause="' + rg.from + '" data-delta="1" aria-label="Pause um 1 Stunde verlängern">+</button></span>';
+        } else {
+          html += '<span class="pause-txt">Pause ' + pause + ' h</span>';
+        }
+        html += '</th><td class="pause-fill" colspan="' + nCols + '"></td></tr>';
+      }
     });
     html += '</tbody>';
     $('matrix').innerHTML = html;
@@ -529,8 +591,7 @@ if (typeof document !== 'undefined') (function () {
     table.querySelectorAll('.show').forEach(el => el.classList.remove('show'));
     const cur = state.sel || state.hover;
     if (!cur) return;
-    const row = table.tBodies[0] && table.tBodies[0].rows[cur.r];
-    if (row) row.querySelectorAll('td, th').forEach(el => el.classList.add('show'));
+    table.querySelectorAll('td[data-r="' + cur.r + '"], th[data-row="' + cur.r + '"]').forEach(el => el.classList.add('show'));
     table.querySelectorAll('td[data-c="' + cur.c + '"]').forEach(el => el.classList.add('show'));
     const head = table.tHead && table.tHead.rows[0].cells[cur.c + 1];
     if (head) head.classList.add('show');
@@ -543,6 +604,15 @@ if (typeof document !== 'undefined') (function () {
       return td ? { r: +td.dataset.r, c: +td.dataset.c } : null;
     };
     table.addEventListener('click', e => {
+      const btn = e.target.closest && e.target.closest('button[data-pause]');
+      if (btn) { changePause(+btn.dataset.pause, +btn.dataset.delta); return; }
+      const head = e.target.closest && e.target.closest('th[data-point]');
+      if (head) {
+        const i = +head.dataset.point;
+        state.editRow = state.editRow === i ? null : i;
+        rerenderKeepScroll();
+        return;
+      }
       const p = cellOf(e);
       if (!p) return;
       state.sel = (state.sel && state.sel.r === p.r && state.sel.c === p.c) ? null : p;
@@ -560,6 +630,27 @@ if (typeof document !== 'undefined') (function () {
       state.hover = null;
       if (!state.sel) applySelection();
     });
+  }
+
+  /* ---- Pausen ---- */
+
+  function rerenderKeepScroll() {
+    const wrap = $('matrixWrap');
+    const top = wrap.scrollTop, left = wrap.scrollLeft;
+    render();
+    wrap.scrollTop = top; wrap.scrollLeft = left;
+  }
+
+  function changePause(i, delta) {
+    const next = Math.max(0, Math.min(24, (state.pauses[i] || 0) + delta));
+    if (next) state.pauses[i] = next; else delete state.pauses[i];
+    savePauses();
+    const needed = START_COLUMNS + Math.ceil(state.sampled.durationMin / 60) + totalPauseHours() + 2;
+    if (needed > state.fetchedHours) {
+      const wrap = $('matrixWrap');
+      const top = wrap.scrollTop, left = wrap.scrollLeft;
+      fetchWeather().then(() => { wrap.scrollTop = top; wrap.scrollLeft = left; });
+    } else rerenderKeepScroll();
   }
 
   /* ---- Zoom ---- */

@@ -196,7 +196,20 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; position: 
 }
 .matrix td { background-color: var(--card); cursor: pointer; overflow: hidden; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
 .matrix td.na { background-color: transparent; }
-.wind { position: absolute; left: 50%; top: 50%; pointer-events: none; transition: opacity 0.12s; }
+.wind { position: absolute; left: 50%; top: 0; transform: translateX(-50%); pointer-events: none; transition: opacity 0.12s; }
+.lg-wind { vertical-align: -1px; margin-right: 4px; }
+.est-note.demo { color: #1A4FB0; background: rgba(47, 111, 208, 0.12); }
+.est-note.demo::before { content: "i"; background: #2F6FD0; font-style: italic; }
+@media (prefers-color-scheme: dark) { .est-note.demo { color: #9DC0FF; background: rgba(127, 176, 255, 0.16); } }
+
+.matrix tbody th[data-point] { cursor: pointer; }
+.pause-row th, .pause-row td { background: var(--sticky-bg); height: 40px; padding: 2px 8px 2px 10px; border-bottom: 1px solid var(--line); }
+.pause-row td.pause-fill { background-color: var(--paper); background-image: repeating-linear-gradient(90deg, transparent 0 10px, rgba(86, 100, 90, 0.12) 10px 11px); }
+.pause-ctl { display: inline-flex; align-items: center; gap: 6px; }
+.pause-txt { font-size: 12px; font-weight: 700; color: var(--green-2); white-space: nowrap; }
+@media (prefers-color-scheme: dark) { .pause-txt { color: #9FD8B0; } }
+.pbtn { font: inherit; font-size: 16px; font-weight: 700; width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; padding: 0; line-height: 1; }
+.pbtn:disabled { opacity: 0.35; cursor: default; }
 .vals { display: none; position: relative; flex-direction: column; align-items: center; gap: 0; line-height: 1.15; color: #1C2A21; background: rgba(255, 255, 255, 0.86); border-radius: 8px; padding: 2px 6px; margin: 0 auto; width: fit-content; }
 .vals b { font-size: 15px; font-weight: 800; }
 .vals i { font-style: normal; font-size: 11px; font-weight: 700; }
