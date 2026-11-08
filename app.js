@@ -535,25 +535,45 @@ if (typeof document !== 'undefined') (function () {
 
   /* ---- GPX laden ---- */
 
-  async function pasteFromClipboard() {
-    let text = '';
-    try {
-      if (!navigator.clipboard || !navigator.clipboard.readText) throw new Error('no clipboard');
-      text = await navigator.clipboard.readText();
-    } catch (e) {
-      openPasteDialog();
-      return;
+  // Zwischenablage lesen: erst als Text, sonst alle angebotenen Formate durchprobieren
+  async function readClipboardAny() {
+    const tried = [];
+    if (navigator.clipboard && navigator.clipboard.readText) {
+      try {
+        const t = await navigator.clipboard.readText();
+        if (t && t.trim()) return { text: t, tried };
+        tried.push('text/plain (leer)');
+      } catch (e) { tried.push('readText: ' + (e && e.name || e)); }
     }
-    if (!text || !text.trim()) {
-      setStatus('Die Zwischenablage ist leer. Kopiere zuerst den GPX-Inhalt.', true);
-      return;
+    if (navigator.clipboard && navigator.clipboard.read) {
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          for (const type of item.types) {
+            try {
+              const blob = await item.getType(type);
+              const t = await blob.text();
+              tried.push(type + ' (' + t.length + ')');
+              if (t && extractGpxText(t)) return { text: t, tried };
+            } catch (e) { tried.push(type + ': ' + (e && e.name || e)); }
+          }
+        }
+      } catch (e) { tried.push('read: ' + (e && e.name || e)); }
     }
-    loadGpxText(text);
+    return { text: '', tried };
   }
 
-  function openPasteDialog() {
+  async function pasteFromClipboard() {
+    const { text, tried } = await readClipboardAny();
+    if (text && text.trim()) { loadGpxText(text); return; }
+    // Nichts Lesbares: Einfügefeld öffnen (natives Einsetzen kann mehr Formate als die Web-API)
+    openPasteDialog('Die Zwischenablage konnte nicht als Text gelesen werden' + (tried.length ? ' (' + tried.join(', ') + ')' : '') + '. Tippe lange in das Feld und wähle „Einsetzen“.');
+  }
+
+  function openPasteDialog(hint) {
     const dlg = $('pasteDialog');
     $('pasteArea').value = '';
+    if (hint) $('pasteHint').textContent = hint;
     if (typeof dlg.showModal === 'function') {
       dlg.showModal();
       setTimeout(() => $('pasteArea').focus(), 50);
