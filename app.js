@@ -579,24 +579,24 @@ if (typeof document !== 'undefined') (function () {
     $('demoNote').hidden = !state.demo;
     const z = zoomMatrix(samples, matrix, state.zy, state.zx);
 
-    // Anzeigespalten: Datenspalten, davor ggf. eine Pausenspalte (Uhrzeit-Pause)
+    // Anzeigespalten: Datenspalten, danach ggf. eine Pausenspalte
+    // (Uhrzeit-Pause zwischen dieser und der nächsten Abfahrtszeit)
     const display = [];
     z.colGroups.forEach((cg, idx) => {
       const at = roundTo30(cg.start);
-      if (idx > 0) {
-        const prevAt = roundTo30(z.colGroups[idx - 1].start);
-        const h = cps.filter(p => p.at > prevAt && p.at <= at).reduce((a, p) => a + p.h, 0);
-        const editable = state.zx === 1;
-        if (h > 0 || (editable && state.editCol === at)) display.push({ kind: 'pause', at, h, editable });
-      }
       display.push({ kind: 'col', idx, cg, at });
+      const next = z.colGroups[idx + 1];
+      const nextAt = next ? roundTo30(next.start) : at + 3600 * state.zx;
+      const h = cps.filter(p => p.at > at && p.at <= nextAt).reduce((a, p) => a + p.h, 0);
+      const editable = state.zx === 1;
+      if (h > 0 || (editable && state.editCol === nextAt)) display.push({ kind: 'pause', at: nextAt, h, editable });
     });
 
     let html = '<thead><tr><th class="corner" scope="col">Fahrzeit · km · Höhe<br>Abfahrt →</th>';
     let lastDay = fmtDay.format(new Date(nowSec * 1000));
     display.forEach(dc => {
       if (dc.kind === 'pause') {
-        html += '<th scope="col" class="pause-col-h">';
+        html += '<th scope="col" class="pause-col-h" data-pcol="' + dc.at + '"><div class="pc">';
         if (dc.editable) {
           html += '<span class="pause-vctl"><button type="button" class="pbtn" data-cpause="' + dc.at + '" data-delta="1" aria-label="Pause um ' + fmtTime.format(new Date(dc.at * 1000)) + ' um 1 Stunde verlängern">+</button>' +
             '<span class="pause-txt">' + (dc.h ? dc.h + ' h' : 'Pause') + '</span>' +
@@ -604,15 +604,15 @@ if (typeof document !== 'undefined') (function () {
         } else {
           html += '<span class="pause-txt">' + dc.h + ' h</span>';
         }
-        html += '</th>';
+        html += '</div></th>';
         return;
       }
       const d = new Date(dc.at * 1000);
       const day = fmtDay.format(d);
       const dayLabel = dc.idx === 0 ? 'jetzt' : (day !== lastDay ? day : '');
       lastDay = day;
-      const canEdit = dc.idx > 0 && state.zx === 1;
-      html += '<th scope="col" data-col="' + dc.idx + '"' + (canEdit ? ' data-colat="' + dc.at + '"' : '') + (dc.idx === 0 ? ' class="now"' : '') +
+      const canEdit = state.zx === 1;
+      html += '<th scope="col" data-col="' + dc.idx + '"' + (canEdit ? ' data-colat="' + (dc.at + 3600) + '"' : '') + (dc.idx === 0 ? ' class="now"' : '') +
         '><span class="day">' + esc(dayLabel || ' ') + '</span>' + fmtTime.format(d) + '</th>';
     });
     html += '</tr></thead><tbody>';
@@ -635,7 +635,7 @@ if (typeof document !== 'undefined') (function () {
         html += '<tr><th scope="row"' + rowAttr + '><span class="rh-time">+' + fmtDuration(s.tEff) + '</span><span class="rh-meta">' + meta.join(' · ') + '</span></th>';
       }
       display.forEach(dc => {
-        html += dc.kind === 'pause' ? '<td class="pause-col" aria-hidden="true"></td>' : cellHtml(z.cells[r][dc.idx], sc, r, dc.idx);
+        html += dc.kind === 'pause' ? '<td class="pause-col" data-pcol="' + dc.at + '" aria-hidden="true"><div class="pc"></div></td>' : cellHtml(z.cells[r][dc.idx], sc, r, dc.idx);
       });
       html += '</tr>';
 
@@ -644,7 +644,7 @@ if (typeof document !== 'undefined') (function () {
       for (let i = rg.from; i < rg.to && i < lastIdx; i++) pause += state.pauses[i] || 0;
       const editing = editable && state.editRow === rg.from;
       if (pause > 0 || editing) {
-        html += '<tr class="pause-row"><th scope="row">';
+        html += '<tr class="pause-row" data-prow="' + rg.from + '"><th scope="row"><div class="pi">';
         if (editable) {
           html += '<span class="pause-ctl"><button type="button" class="pbtn" data-pause="' + rg.from + '" data-delta="-1" aria-label="Pause um 1 Stunde kürzen"' + (pause ? '' : ' disabled') + '>−</button>' +
             '<span class="pause-txt">' + (pause ? 'Pause ' + pause + ' h' : 'Pause') + '</span>' +
@@ -652,13 +652,14 @@ if (typeof document !== 'undefined') (function () {
         } else {
           html += '<span class="pause-txt">Pause ' + pause + ' h</span>';
         }
-        html += '</th><td class="pause-fill" colspan="' + nCols + '"></td></tr>';
+        html += '</div></th><td class="pause-fill" colspan="' + nCols + '"><div class="pi"></div></td></tr>';
       }
     });
     html += '</tbody>';
     $('matrix').innerHTML = html;
     state.sel = null;
     state.hover = null;
+    if (state.anim) { const a = state.anim; state.anim = null; playEnter(a); }
   }
 
   /* ---- Werte für Zeile + Spalte einblenden (Hover / Tippen) ---- */
@@ -686,19 +687,9 @@ if (typeof document !== 'undefined') (function () {
       const cbtn = e.target.closest && e.target.closest('button[data-cpause]');
       if (cbtn) { changeClockPause(+cbtn.dataset.cpause, +cbtn.dataset.delta); return; }
       const colHead = e.target.closest && e.target.closest('th[data-colat]');
-      if (colHead) {
-        const at = +colHead.dataset.colat;
-        state.editCol = state.editCol === at ? null : at;
-        rerenderKeepScroll();
-        return;
-      }
+      if (colHead) { toggleEditor('col', +colHead.dataset.colat); return; }
       const head = e.target.closest && e.target.closest('th[data-point]');
-      if (head) {
-        const i = +head.dataset.point;
-        state.editRow = state.editRow === i ? null : i;
-        rerenderKeepScroll();
-        return;
-      }
+      if (head) { toggleEditor('row', +head.dataset.point); return; }
       const p = cellOf(e);
       if (!p) return;
       state.sel = (state.sel && state.sel.r === p.r && state.sel.c === p.c) ? null : p;
@@ -727,15 +718,59 @@ if (typeof document !== 'undefined') (function () {
     wrap.scrollTop = top; wrap.scrollLeft = left;
   }
 
+  /* Animation: neue Pausenzeile/-spalte wächst in 0,5 s auf, entfernte schrumpft */
+  const ANIM_MS = 500;
+  function animSelector(a) {
+    return a.kind === 'row' ? '[data-prow="' + a.key + '"]' : '[data-pcol="' + a.key + '"]';
+  }
+  function playEnter(a) {
+    const els = $('matrix').querySelectorAll(animSelector(a));
+    els.forEach(el => el.classList.add('enter'));
+    void $('matrix').offsetHeight; // Startzustand festschreiben
+    requestAnimationFrame(() => els.forEach(el => el.classList.remove('enter')));
+  }
+  function playLeave(a, done) {
+    const els = $('matrix').querySelectorAll(animSelector(a));
+    if (!els.length) { done(); return; }
+    els.forEach(el => el.classList.add('leave'));
+    setTimeout(done, ANIM_MS);
+  }
+
+  function toggleEditor(kind, key) {
+    const editKey = kind === 'row' ? 'editRow' : 'editCol';
+    const store_ = kind === 'row' ? state.pauses : state.clockPauses;
+    if (state[editKey] === key) {
+      // Schließen: ohne Pause verschwindet die Zeile/Spalte animiert
+      if (!store_[key]) playLeave({ kind, key }, () => { state[editKey] = null; rerenderKeepScroll(); });
+      else { state[editKey] = null; rerenderKeepScroll(); }
+      return;
+    }
+    state[editKey] = key;
+    if (!store_[key]) state.anim = { kind, key };
+    rerenderKeepScroll();
+  }
+
   function changePause(i, delta) {
-    const next = Math.max(0, Math.min(24, (state.pauses[i] || 0) + delta));
-    if (next) state.pauses[i] = next; else delete state.pauses[i];
+    const cur = state.pauses[i] || 0;
+    const next = Math.max(0, Math.min(24, cur + delta));
+    if (next === cur) return;
+    if (next === 0) {
+      playLeave({ kind: 'row', key: i }, () => { delete state.pauses[i]; state.editRow = null; afterPauseChange(); });
+      return;
+    }
+    state.pauses[i] = next;
     afterPauseChange();
   }
 
   function changeClockPause(at, delta) {
-    const next = Math.max(0, Math.min(24, (state.clockPauses[at] || 0) + delta));
-    if (next) state.clockPauses[at] = next; else delete state.clockPauses[at];
+    const cur = state.clockPauses[at] || 0;
+    const next = Math.max(0, Math.min(24, cur + delta));
+    if (next === cur) return;
+    if (next === 0) {
+      playLeave({ kind: 'col', key: at }, () => { delete state.clockPauses[at]; state.editCol = null; afterPauseChange(); });
+      return;
+    }
+    state.clockPauses[at] = next;
     afterPauseChange();
   }
 

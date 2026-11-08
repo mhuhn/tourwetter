@@ -203,7 +203,9 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; position: 
 @media (prefers-color-scheme: dark) { .est-note.demo { color: #9DC0FF; background: rgba(127, 176, 255, 0.16); } }
 
 .matrix tbody th[data-point] { cursor: pointer; }
-.pause-row th, .pause-row td { background: var(--sticky-bg); height: 40px; padding: 2px 8px 2px 10px; border-bottom: 1px solid var(--line); }
+.pause-row th, .pause-row td { background: var(--sticky-bg); height: auto; padding: 0; border-bottom: 1px solid var(--line); }
+.pause-row .pi { height: 42px; padding: 0 8px 0 10px; display: flex; align-items: center; overflow: hidden; transition: height 0.5s ease; }
+.pause-row.enter .pi, .pause-row.leave .pi { height: 0; }
 .pause-row td.pause-fill { background-color: var(--paper); background-image: repeating-linear-gradient(90deg, transparent 0 10px, rgba(86, 100, 90, 0.12) 10px 11px); }
 .pause-ctl { display: inline-flex; align-items: center; gap: 6px; }
 .pause-txt { font-size: 12px; font-weight: 700; color: var(--green-2); white-space: nowrap; }
@@ -212,11 +214,13 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; position: 
 .pbtn:disabled { opacity: 0.35; cursor: default; }
 
 .matrix thead th[data-colat] { cursor: pointer; }
-.matrix thead th.pause-col-h { min-width: 46px; width: 46px; padding: 4px 2px; }
-.pause-vctl { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; }
+.matrix thead th.pause-col-h, .matrix td.pause-col { min-width: 0; width: auto; padding: 0; }
+.pause-col-h .pc, .pause-col .pc { width: 46px; overflow: hidden; display: flex; justify-content: center; transition: width 0.5s ease; }
+.pause-col-h.enter .pc, .pause-col-h.leave .pc, .pause-col.enter .pc, .pause-col.leave .pc { width: 0; }
+.pause-vctl { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 0; }
 .pause-vctl .pbtn { width: 30px; height: 26px; font-size: 15px; }
 .matrix td.pause-col {
-  min-width: 46px; width: 46px; padding: 0; cursor: default;
+  cursor: default;
   background-color: var(--paper);
   background-image: repeating-linear-gradient(0deg, transparent 0 10px, rgba(86, 100, 90, 0.12) 10px 11px);
 }
