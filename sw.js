@@ -1,5 +1,5 @@
 /* Tourwetter Service Worker: App-Dateien offline, Wetterdaten immer frisch */
-const CACHE = 'tourwetter-v9';
+const CACHE = 'tourwetter-v10';
 const ASSETS = [
   './',
   'index.html',

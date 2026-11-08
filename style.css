@@ -204,10 +204,13 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; position: 
 
 .matrix tbody th[data-point] { cursor: pointer; }
 .pause-row th, .pause-row td { background: var(--sticky-bg); height: auto; padding: 0; border-bottom: 1px solid var(--line); }
-.pause-row .pi { height: 42px; padding: 0 8px 0 10px; display: flex; align-items: center; overflow: hidden; transition: height 0.5s ease; }
+.pause-row .pi { height: 42px; padding: 0 8px 0 10px; display: flex; align-items: center; overflow: hidden; overflow: clip; transition: height 0.5s ease; }
 .pause-row.enter .pi, .pause-row.leave .pi { height: 0; }
 .pause-row td.pause-fill { background-color: var(--paper); background-image: repeating-linear-gradient(90deg, transparent 0 10px, rgba(86, 100, 90, 0.12) 10px 11px); }
-.pause-ctl { display: inline-flex; align-items: center; gap: 6px; }
+.pause-ctl { display: inline-flex; align-items: center; gap: 8px; position: sticky; left: calc(var(--rowhead-w, var(--head-w)) + 10px); }
+.pr-txt { display: flex; flex-direction: column; justify-content: center; }
+.pause-row .rh-time { color: var(--green-2); font-size: 13px; }
+@media (prefers-color-scheme: dark) { .pause-row .rh-time { color: #9FD8B0; } }
 .pause-txt { font-size: 12px; font-weight: 700; color: var(--green-2); white-space: nowrap; }
 @media (prefers-color-scheme: dark) { .pause-txt { color: #9FD8B0; } }
 .pbtn { font: inherit; font-size: 16px; font-weight: 700; width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; padding: 0; line-height: 1; }
@@ -215,15 +218,22 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; position: 
 
 .matrix thead th[data-colat] { cursor: pointer; }
 .matrix thead th.pause-col-h, .matrix td.pause-col { min-width: 0; width: auto; padding: 0; }
-.pause-col-h .pc, .pause-col .pc { width: 46px; overflow: hidden; display: flex; justify-content: center; transition: width 0.5s ease; }
+/* kein Scroll-Container, sonst wirkt position: sticky nur innerhalb der Zelle */
+.matrix td.pause-col, .matrix td.pause-fill, .pause-row th { overflow: visible; }
+.pause-col-h .pc, .pause-col .pc { width: 46px; overflow: hidden; overflow: clip; transition: width 0.5s ease; }
 .pause-col-h.enter .pc, .pause-col-h.leave .pc, .pause-col.enter .pc, .pause-col.leave .pc { width: 0; }
-.pause-vctl { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 0; }
-.pause-vctl .pbtn { width: 30px; height: 26px; font-size: 15px; }
+.pause-col-h .pc { display: flex; justify-content: center; }
+.pc-txt { display: block; padding: 6px 0; font-size: 13px; font-weight: 700; color: var(--green-2); white-space: nowrap; }
+@media (prefers-color-scheme: dark) { .pc-txt { color: #9FD8B0; } }
 .matrix td.pause-col {
+  vertical-align: top;
   cursor: default;
   background-color: var(--paper);
   background-image: repeating-linear-gradient(0deg, transparent 0 10px, rgba(86, 100, 90, 0.12) 10px 11px);
 }
+/* Bedienung der Spaltenpause bleibt beim vertikalen Scrollen sichtbar */
+.pause-vctl { position: sticky; top: calc(var(--head-h, 80px) + 10px); display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0; }
+.pause-vctl .pbtn { width: 34px; height: 34px; font-size: 17px; }
 .vals { display: none; position: relative; flex-direction: column; align-items: center; gap: 0; line-height: 1.15; color: #1C2A21; background: rgba(255, 255, 255, 0.86); border-radius: 8px; padding: 2px 6px; margin: 0 auto; width: fit-content; }
 .vals b { font-size: 15px; font-weight: 800; }
 .vals i { font-style: normal; font-size: 11px; font-weight: 700; }

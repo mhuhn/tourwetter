@@ -641,15 +641,8 @@ if (typeof document !== 'undefined') (function () {
     let lastDay = fmtDay.format(new Date(nowSec * 1000));
     display.forEach(dc => {
       if (dc.kind === 'pause') {
-        html += '<th scope="col" class="pause-col-h" data-pcol="' + dc.at + '"><div class="pc">';
-        if (dc.editable) {
-          html += '<span class="pause-vctl"><button type="button" class="pbtn" data-cpause="' + dc.at + '" data-delta="1" aria-label="Pause um ' + fmtTime.format(new Date(dc.at * 1000)) + ' um 1 Stunde verlängern">+</button>' +
-            '<span class="pause-txt">' + (dc.h ? dc.h + ' h' : 'Pause') + '</span>' +
-            '<button type="button" class="pbtn" data-cpause="' + dc.at + '" data-delta="-1" aria-label="Pause um 1 Stunde kürzen"' + (dc.h ? '' : ' disabled') + '>−</button></span>';
-        } else {
-          html += '<span class="pause-txt">' + dc.h + ' h</span>';
-        }
-        html += '</div></th>';
+        // Kopf nur beschriftet (gleiche Höhe wie die Zeit-Köpfe); Bedienung steht im Rumpf
+        html += '<th scope="col" class="pause-col-h" data-pcol="' + dc.at + '"><div class="pc"><span class="pc-txt"><span class="day">Pause</span>' + dc.h + ' h</span></div></th>';
         return;
       }
       const d = new Date(dc.at * 1000);
@@ -663,15 +656,36 @@ if (typeof document !== 'undefined') (function () {
     html += '</tr></thead><tbody>';
 
     const sc = scalesFor(matrixExtremes(matrix));
-    const nCols = display.length;
     const lastIdx = samples.length - 1;
+
+    // Zeilen-Pausen vorab bestimmen (für die Gesamtzahl der Rumpfzeilen)
+    const rowPause = z.rowGroups.map(rg => {
+      const editable = state.zy === 1 && rg.from < lastIdx;
+      let h = 0;
+      for (let i = rg.from; i < rg.to && i < lastIdx; i++) h += state.pauses[i] || 0;
+      const show = h > 0 || (editable && state.editRow === rg.from);
+      return { editable, h, show };
+    });
+    const bodyRows = z.rowGroups.length + rowPause.filter(p => p.show).length;
+
+    const colPauseCell = dc => {
+      let inner;
+      if (dc.editable) {
+        inner = '<button type="button" class="pbtn" data-cpause="' + dc.at + '" data-delta="1" aria-label="Pause um ' + fmtTime.format(new Date(dc.at * 1000)) + ' um 1 Stunde verlängern">+</button>' +
+          '<span class="pause-txt">' + dc.h + ' h</span>' +
+          '<button type="button" class="pbtn" data-cpause="' + dc.at + '" data-delta="-1" aria-label="Pause um 1 Stunde kürzen"' + (dc.h ? '' : ' disabled') + '>−</button>';
+      } else {
+        inner = '<span class="pause-txt">' + dc.h + ' h</span>';
+      }
+      return '<td class="pause-col" data-pcol="' + dc.at + '" rowspan="' + bodyRows + '"><div class="pc pause-vctl">' + inner + '</div></td>';
+    };
+
     z.rowGroups.forEach((rg, r) => {
       const s = rg.sample;
       const meta = [fmtNum1.format(s.km) + ' km'];
       if (Number.isFinite(s.ele)) meta.push(Math.round(s.ele) + ' m');
-      // Bei 1×-Zoom gehört die Zeile genau zu einem Punkt → Pausen dort bearbeitbar
-      const editable = state.zy === 1 && rg.from < lastIdx;
-      const rowAttr = ' data-row="' + r + '"' + (editable ? ' data-point="' + rg.from + '"' : '');
+      const rp = rowPause[r];
+      const rowAttr = ' data-row="' + r + '"' + (rp.editable ? ' data-point="' + rg.from + '"' : '');
       if (rg.wpt) {
         const w = rg.wpt;
         html += '<tr class="wpt-row"><th scope="row"' + rowAttr + ' title="' + esc(w.name) + '"><span class="rh-name">' + esc(w.name) + '</span>' +
@@ -680,24 +694,32 @@ if (typeof document !== 'undefined') (function () {
         html += '<tr><th scope="row"' + rowAttr + '><span class="rh-time">+' + fmtDuration(s.tEff) + '</span><span class="rh-meta">' + meta.join(' · ') + '</span></th>';
       }
       display.forEach(dc => {
-        html += dc.kind === 'pause' ? '<td class="pause-col" data-pcol="' + dc.at + '" aria-hidden="true"><div class="pc"></div></td>' : cellHtml(z.cells[r][dc.idx], sc, r, dc.idx);
+        if (dc.kind === 'pause') { if (r === 0) html += colPauseCell(dc); return; } // durchgehende Zelle über alle Zeilen
+        html += cellHtml(z.cells[r][dc.idx], sc, r, dc.idx);
       });
       html += '</tr>';
 
-      // Pausen nach dieser Zeile (bzw. Gruppe)
-      let pause = 0;
-      for (let i = rg.from; i < rg.to && i < lastIdx; i++) pause += state.pauses[i] || 0;
-      const editing = editable && state.editRow === rg.from;
-      if (pause > 0 || editing) {
-        html += '<tr class="pause-row" data-prow="' + rg.from + '"><th scope="row"><div class="pi">';
-        if (editable) {
-          html += '<span class="pause-ctl"><button type="button" class="pbtn" data-pause="' + rg.from + '" data-delta="-1" aria-label="Pause um 1 Stunde kürzen"' + (pause ? '' : ' disabled') + '>−</button>' +
-            '<span class="pause-txt">' + (pause ? 'Pause ' + pause + ' h' : 'Pause') + '</span>' +
-            '<button type="button" class="pbtn" data-pause="' + rg.from + '" data-delta="1" aria-label="Pause um 1 Stunde verlängern">+</button></span>';
-        } else {
-          html += '<span class="pause-txt">Pause ' + pause + ' h</span>';
-        }
-        html += '</div></th><td class="pause-fill" colspan="' + nCols + '"><div class="pi"></div></td></tr>';
+      // Zeilen-Pause: Kopf nur beschriftet, Bedienung im breiten Bereich daneben
+      if (rp.show) {
+        html += '<tr class="pause-row" data-prow="' + rg.from + '"><th scope="row"><div class="pi"><span class="pr-txt"><span class="rh-time">Pause</span><span class="rh-meta">' + rp.h + ' h</span></span></div></th>';
+        // Füllbereiche zwischen den durchgehenden Pausenspalten
+        const segs = [];
+        let n = 0;
+        display.forEach(dc => { if (dc.kind === 'pause') { if (n) segs.push(n); n = 0; } else n++; });
+        if (n) segs.push(n);
+        // Bedienung in jedem ausreichend breiten Abschnitt, damit sie beim Scrollen sichtbar bleibt
+        const wide = segs.map(c => c >= 3);
+        if (!wide.some(Boolean)) wide[0] = true;
+        segs.forEach((cnt, k) => {
+          let inner = '';
+          if (wide[k] && rp.editable) {
+            inner = '<span class="pause-ctl"><button type="button" class="pbtn" data-pause="' + rg.from + '" data-delta="-1" aria-label="Pause um 1 Stunde kürzen"' + (rp.h ? '' : ' disabled') + '>−</button>' +
+              '<span class="pause-txt">' + rp.h + ' h Pause nach diesem Punkt</span>' +
+              '<button type="button" class="pbtn" data-pause="' + rg.from + '" data-delta="1" aria-label="Pause um 1 Stunde verlängern">+</button></span>';
+          }
+          html += '<td class="pause-fill" colspan="' + cnt + '"><div class="pi">' + inner + '</div></td>';
+        });
+        html += '</tr>';
       }
     });
     html += '</tbody>';
@@ -705,6 +727,11 @@ if (typeof document !== 'undefined') (function () {
     state.sel = null;
     state.hover = null;
     if (state.anim) { const a = state.anim; state.anim = null; playEnter(a); }
+    // Höhe des Tabellenkopfs für die mitlaufende Pausen-Bedienung (erst nach Animationsstart messen)
+    const thead = $('matrix').tHead;
+    if (thead) $('matrixWrap').style.setProperty('--head-h', thead.offsetHeight + 'px');
+    const rowHead = $('matrix').querySelector('tbody th');
+    if (rowHead) $('matrixWrap').style.setProperty('--rowhead-w', rowHead.offsetWidth + 'px');
   }
 
   /* ---- Werte für Zeile + Spalte einblenden (Hover / Tippen) ---- */
