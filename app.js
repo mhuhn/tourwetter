@@ -227,11 +227,20 @@ function matrixExtremes(matrix) {
   return { minT, maxT, maxR, maxW };
 }
 
-/** Skalen laut Vorgabe: Blau ab < 20 °C, Rot-Orange ab > 25 °C, Regen ≥ 4 mm/h, Wind ≥ 40 km/h als Maximum. */
+const MIN_TEMP_SPAN = 3; // °C: kleinere Spannen werden nicht weiter aufgespreizt (Rauschen)
+
+/**
+ * Skalen: Blau unter 20 °C, Rot-Orange über 25 °C – jeweils auf die tatsächliche Spanne
+ * der Matrix aufgespreizt, damit auch kleine Unterschiede (z. B. 5–10 °C) deutlich werden.
+ * Regen-Maximum ≥ 4 mm/h, Wind-Maximum ≥ 40 km/h.
+ */
 function scalesFor(ext) {
+  const coldTop = Math.min(20, ext.maxT);                         // wärmster „kalter“ Wert → hellstes Blau
+  const coldBottom = Math.min(ext.minT, coldTop - MIN_TEMP_SPAN); // kältester Wert → kräftigstes Blau
+  const hotBottom = Math.max(25, ext.minT);                       // kühlster „warmer“ Wert → hellstes Orange
+  const hotTop = Math.max(ext.maxT, hotBottom + MIN_TEMP_SPAN);   // wärmster Wert → dunkelstes Rot-Orange
   return {
-    coldRef: Math.min(5, ext.minT),
-    hotRef: Math.max(35, ext.maxT),
+    coldTop, coldBottom, hotBottom, hotTop,
     rainRef: Math.max(4, ext.maxR),
     windRef: Math.max(40, ext.maxW)
   };
@@ -240,12 +249,29 @@ function scalesFor(ext) {
 function cellStyle(c, sc) {
   const clamp01 = x => Math.max(0, Math.min(1, x));
   let tone = null, f = 0;
-  if (c.t < 20) { f = clamp01((20 - c.t) / Math.max(0.1, 20 - sc.coldRef)); tone = 'cold'; }
-  else if (c.t > 25) { f = clamp01((c.t - 25) / Math.max(0.1, sc.hotRef - 25)); tone = 'hot'; }
-  const alpha = tone ? 0.08 + 0.84 * f : 0;
+  if (c.t < 20) { tone = 'cold'; f = clamp01((sc.coldTop - c.t) / Math.max(0.1, sc.coldTop - sc.coldBottom)); }
+  else if (c.t > 25) { tone = 'hot'; f = clamp01((c.t - sc.hotBottom) / Math.max(0.1, sc.hotTop - sc.hotBottom)); }
   const rainF = c.r >= 0.05 ? clamp01(c.r / sc.rainRef) : 0;
   const windF = c.w >= 3 ? clamp01(c.w / sc.windRef) : 0;
-  return { tone, alpha, rainF, windF };
+  return { tone, f, rainF, windF };
+}
+
+// Mehrstufige Farbverläufe mit klaren Helligkeitsschritten (hell → kräftig)
+const COLD_STOPS = [[226, 238, 250], [160, 196, 238], [96, 146, 222], [46, 92, 186], [22, 44, 120]];
+const HOT_STOPS = [[253, 232, 214], [249, 186, 140], [238, 128, 74], [214, 78, 30], [150, 36, 12]];
+
+function rampColor(stops, f) {
+  const x = Math.max(0, Math.min(1, f)) * (stops.length - 1);
+  const i = Math.min(stops.length - 2, Math.floor(x));
+  const k = x - i;
+  return stops[i].map((v, j) => Math.round(v + (stops[i + 1][j] - v) * k));
+}
+
+/** Hintergrundfarbe für eine Temperatur-Zelle oder null (neutral 20–25 °C). */
+function tempFill(st) {
+  if (!st.tone) return null;
+  const rgb = rampColor(st.tone === 'cold' ? COLD_STOPS : HOT_STOPS, st.f);
+  return { css: 'rgb(' + rgb.join(',') + ')', dark: st.f > 0.55 };
 }
 
 /** Rohmatrix: Zeilen = Tourpunkte, Spalten = Abfahrtszeiten (jetzt + h Stunden). */
@@ -343,7 +369,7 @@ function demoRain(pointIndex, timeSec) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, arrivalTime, buildMatrix, matrixExtremes, scalesFor, cellStyle, aggregate, zoomMatrix, roundTo30 };
+  module.exports = { parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, arrivalTime, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
 }
 
 /* ---------- Browser-App ---------- */
@@ -507,9 +533,6 @@ if (typeof document !== 'undefined') (function () {
 
   /* ---- Darstellung ---- */
 
-  const COLD_RGB = '23,64,158';   // kräftiges Dunkelblau
-  const HOT_RGB = '201,60,18';    // dunkles Rot-Orange
-
   // Windkeil: Dreieck vom oberen Zellrand Richtung Mitte, breiter und länger bei mehr Wind
   function windWedge(f) {
     if (f <= 0) return '';
@@ -529,12 +552,10 @@ if (typeof document !== 'undefined') (function () {
       const gap = (Number(w) + 5).toFixed(1);
       layers.push('repeating-linear-gradient(135deg, rgba(255,255,255,' + op + ') 0 1px, rgba(28,86,196,' + op + ') 1px ' + w + 'px, transparent ' + w + 'px ' + gap + 'px)');
     }
-    if (st.tone) {
-      const col2 = 'rgba(' + (st.tone === 'cold' ? COLD_RGB : HOT_RGB) + ',' + st.alpha.toFixed(2) + ')';
-      layers.push('linear-gradient(' + col2 + ',' + col2 + ')');
-    }
+    const fill = tempFill(st);
+    if (fill) layers.push('linear-gradient(' + fill.css + ',' + fill.css + ')');
     const style = layers.length ? ' style="background-image:' + layers.join(',') + '"' : '';
-    const dark = st.alpha > 0.45 ? ' dark' : '';
+    const dark = fill && fill.dark ? ' dark' : '';
     const rainTxt = c.r < 0.05 ? '0' : fmtNum1.format(c.r);
     return '<td class="cell' + dark + '" data-r="' + r + '" data-c="' + col + '"' + style + '>' + windWedge(st.windF) +
       '<span class="vals"><b>' + Math.round(c.t) + '°</b><i class="vr">' + rainTxt + '</i><i class="vw">' + Math.round(c.w) + '</i></span></td>';

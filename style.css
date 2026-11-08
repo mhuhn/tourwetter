@@ -244,7 +244,9 @@ td.na .vals { display: flex; color: var(--muted); }
 
 .legend { flex-wrap: wrap; align-items: center; }
 .lg { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; border: 1px solid var(--line); }
-.lg-cold { background: rgb(23, 64, 158); }
-.lg-warm { background: rgb(201, 60, 18); }
+.lg { width: 26px; }
+.lg-cold { background: linear-gradient(90deg, rgb(160, 196, 238), rgb(22, 44, 120)); }
+.lg-warm { background: linear-gradient(90deg, rgb(249, 186, 140), rgb(150, 36, 12)); }
+.lg-rain { width: 14px; }
 .lg-rain { background-color: var(--card); background-image: repeating-linear-gradient(135deg, rgba(28, 86, 196, 0.9) 0 3px, transparent 3px 7px); }
 .lg-hint { color: var(--muted); }
