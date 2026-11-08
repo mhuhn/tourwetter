@@ -316,7 +316,13 @@ function buildMatrix(samples, weather, nowSec, columns = START_COLUMNS, clockPau
   const rows = samples.map((s, i) => starts.map(st => {
     const v = valueAt(weather[i], arrivalTime(st, s.tEff != null ? s.tEff : s.tMin, cps));
     // rd: Windrichtung relativ zur Fahrtrichtung, woher der Wind kommt (0 = von vorn, 90 = von rechts)
-    if (v) v.rd = (v.d != null && s.bearing != null) ? ((v.d - s.bearing) % 360 + 360) % 360 : null;
+    if (v) {
+      v.rd = (v.d != null && s.bearing != null) ? ((v.d - s.bearing) % 360 + 360) % 360 : null;
+      // Anteile in km/h: hw > 0 Gegenwind, < 0 Rückenwind; cw > 0 von rechts, < 0 von links
+      const rad = v.rd == null ? null : v.rd * Math.PI / 180;
+      v.hw = rad == null ? null : v.w * Math.cos(rad);
+      v.cw = rad == null ? null : v.w * Math.sin(rad);
+    }
     return v;
   }));
   return { starts, rows };
@@ -329,6 +335,10 @@ function aggregate(cells) {
   const max = Math.max(...temps);
   const min = Math.min(...temps);
   const mean = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
+  const meanOf = key => {
+    const xs = v.map(c => c[key]).filter(x => x != null);
+    return xs.length ? mean(xs) : null;
+  };
   // Richtungen: nach Windstärke gewichtetes Vektormittel
   const meanDir = key => {
     let u = 0, n = 0;
@@ -345,7 +355,9 @@ function aggregate(cells) {
     r: mean(v.map(c => c.r)),
     w: mean(v.map(c => c.w)),
     d: meanDir('d'),
-    rd: meanDir('rd')
+    rd: meanDir('rd'),
+    hw: meanOf('hw'),
+    cw: meanOf('cw')
   };
 }
 
@@ -565,26 +577,23 @@ if (typeof document !== 'undefined') (function () {
 
   /* ---- Darstellung ---- */
 
-  // Windkeil: Dreieck vom Zellrand bzw. einer Ecke Richtung Mitte – von dort, woher der Wind
-  // relativ zur Fahrtrichtung kommt (oben = Gegenwind, unten = Rückenwind). Größer bei mehr Wind.
-  function windWedge(f, rd) {
-    const sector = windSector(rd);
-    if (f <= 0 || sector == null) return '';
-    let pts, rot;
-    if (sector % 2 === 0) {
-      // Kante: Basis auf dem Rand, Spitze Richtung Mitte; oben gezeichnet, dann gedreht
+  // Wind relativ zur Fahrtrichtung in zwei Keilen:
+  // oben = Gegenwind, unten = Rückenwind, rechts/links = Seitenwind von rechts/links.
+  // Größe je Anteil (km/h) bis zum Maximum; Anteile unter 3 km/h werden nicht gezeigt.
+  function windWedges(c, sc) {
+    if (c.hw == null || c.cw == null) return '';
+    const wedge = (comp, sideA, sideB) => {
+      const mag = Math.abs(comp);
+      if (mag < 3) return '';
+      const f = Math.max(0, Math.min(1, mag / sc.windRef));
       const half = 4 + 18 * f, len = 6 + 25 * f;
-      pts = [[-half, -34], [half, -34], [0, -34 + len]];
-      rot = sector * 45;
-    } else {
-      // Ecke: Basis auf den beiden angrenzenden Rändern, Spitze entlang der Diagonale
-      const leg = 7 + 22 * f, len = 10 + 32 * f;
-      pts = [[34 - leg, -34], [34, -34 + leg], [34 - len / Math.SQRT2, -34 + len / Math.SQRT2]];
-      rot = (sector - 1) * 45; // oben rechts gezeichnet, dann in die richtige Ecke gedreht
-    }
-    pts = pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
-    return '<svg class="wind" viewBox="-34 -34 68 68" preserveAspectRatio="none" aria-hidden="true">' +
-      '<polygon points="' + pts + '" transform="rotate(' + rot + ')" fill="#111" stroke="#fff" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke"/></svg>';
+      const rot = comp > 0 ? sideA : sideB;
+      return '<polygon points="' + (-half).toFixed(1) + ',-34 ' + half.toFixed(1) + ',-34 0,' + (-34 + len).toFixed(1) +
+        '" transform="rotate(' + rot + ')" fill="#111" stroke="#fff" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke"/>';
+    };
+    const shapes = wedge(c.hw, 0, 180) + wedge(c.cw, 90, 270);
+    if (!shapes) return '';
+    return '<svg class="wind" viewBox="-34 -34 68 68" preserveAspectRatio="none" aria-hidden="true">' + shapes + '</svg>';
   }
 
   function cellHtml(c, sc, r, col) {
@@ -602,7 +611,7 @@ if (typeof document !== 'undefined') (function () {
     const style = layers.length ? ' style="background-image:' + layers.join(',') + '"' : '';
     const dark = fill && fill.dark ? ' dark' : '';
     const rainTxt = c.r < 0.05 ? '0' : fmtNum1.format(c.r);
-    return '<td class="cell' + dark + '" data-r="' + r + '" data-c="' + col + '"' + style + '>' + windWedge(st.windF, c.rd) +
+    return '<td class="cell' + dark + '" data-r="' + r + '" data-c="' + col + '"' + style + '>' + windWedges(c, sc) +
       '<span class="vals"><b>' + Math.round(c.t) + '°</b><i class="vr">' + rainTxt + '</i><i class="vw">' + Math.round(c.w) + '</i></span></td>';
   }
 
