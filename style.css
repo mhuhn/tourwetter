@@ -210,6 +210,16 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; position: 
 @media (prefers-color-scheme: dark) { .pause-txt { color: #9FD8B0; } }
 .pbtn { font: inherit; font-size: 16px; font-weight: 700; width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; padding: 0; line-height: 1; }
 .pbtn:disabled { opacity: 0.35; cursor: default; }
+
+.matrix thead th[data-colat] { cursor: pointer; }
+.matrix thead th.pause-col-h { min-width: 46px; width: 46px; padding: 4px 2px; }
+.pause-vctl { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; }
+.pause-vctl .pbtn { width: 30px; height: 26px; font-size: 15px; }
+.matrix td.pause-col {
+  min-width: 46px; width: 46px; padding: 0; cursor: default;
+  background-color: var(--paper);
+  background-image: repeating-linear-gradient(0deg, transparent 0 10px, rgba(86, 100, 90, 0.12) 10px 11px);
+}
 .vals { display: none; position: relative; flex-direction: column; align-items: center; gap: 0; line-height: 1.15; color: #1C2A21; background: rgba(255, 255, 255, 0.86); border-radius: 8px; padding: 2px 6px; margin: 0 auto; width: fit-content; }
 .vals b { font-size: 15px; font-weight: 800; }
 .vals i { font-style: normal; font-size: 11px; font-weight: 700; }
@@ -231,8 +241,6 @@ td.na .vals { display: flex; color: var(--muted); }
 .rh-name { display: block; font-size: 13px; font-weight: 800; color: var(--green-2); overflow: hidden; text-overflow: ellipsis; }
 .rh-name::before { content: ""; display: inline-block; width: 8px; height: 8px; margin-right: 5px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); background: var(--orange); vertical-align: 1px; }
 @media (prefers-color-scheme: dark) { .rh-name { color: #9FD8B0; } }
-.wpt-row td { border-top: 2px solid var(--orange); }
-.wpt-row th { border-top: 2px solid var(--orange); }
 
 .legend { flex-wrap: wrap; align-items: center; }
 .lg { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: -2px; margin-right: 4px; border: 1px solid var(--line); }
