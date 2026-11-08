@@ -196,7 +196,7 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; position: 
 }
 .matrix td { background-color: var(--card); cursor: pointer; overflow: hidden; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; }
 .matrix td.na { background-color: transparent; }
-.wind { position: absolute; left: 50%; top: 0; transform: translateX(-50%); pointer-events: none; transition: opacity 0.12s; }
+.wind { position: absolute; left: 0; top: 0; width: 100%; height: 100%; pointer-events: none; transition: opacity 0.12s; }
 .lg-wind { vertical-align: -1px; margin-right: 4px; }
 .est-note.demo { color: #1A4FB0; background: rgba(47, 111, 208, 0.12); }
 .est-note.demo::before { content: "i"; background: #2F6FD0; font-style: italic; }

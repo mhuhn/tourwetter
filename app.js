@@ -88,6 +88,25 @@ function locateWaypoints(points, waypoints) {
   });
 }
 
+/** Kurs von a nach b in Grad (0 = Nord, 90 = Ost). */
+function bearingDeg(a, b) {
+  const toRad = Math.PI / 180;
+  const y = Math.sin((b.lon - a.lon) * toRad) * Math.cos(b.lat * toRad);
+  const x = Math.cos(a.lat * toRad) * Math.sin(b.lat * toRad) -
+    Math.sin(a.lat * toRad) * Math.cos(b.lat * toRad) * Math.cos((b.lon - a.lon) * toRad);
+  return (Math.atan2(y, x) / toRad + 360) % 360;
+}
+
+/** Fahrtrichtung je Punkt: vom vorherigen zum nachfolgenden Punkt (an den Enden zum/vom Nachbarn). */
+function withBearings(samples) {
+  return samples.map((s, i) => {
+    const a = samples[i - 1] || s;
+    const b = samples[i + 1] || s;
+    const ok = a !== b && (a.lat !== b.lat || a.lon !== b.lon);
+    return { ...s, bearing: ok ? bearingDeg(a, b) : null };
+  });
+}
+
 function haversineKm(a, b) {
   const R = 6371.0088;
   const toRad = Math.PI / 180;
@@ -169,7 +188,7 @@ function samplePoints(points, speedKmh, stepMin = STEP_MIN, waypoints = []) {
     const kept = out.filter(s => located.every(w => Math.abs(s.tMin - w.tMin) >= WPT_EXCLUSION_MIN));
     samples = kept.concat(located).sort((a, b) => a.tMin - b.tMin || (a.name ? 1 : -1));
   }
-  return { samples, totalKm, durationMin, hasEle, usesGpxTime };
+  return { samples: withBearings(samples), totalKm, durationMin, hasEle, usesGpxTime };
 }
 
 function buildForecastUrls(samples, hoursNeeded) {
@@ -294,8 +313,12 @@ function buildMatrix(samples, weather, nowSec, columns = START_COLUMNS, clockPau
   for (let h = 0; h < columns; h++) starts.push(nowSec + h * 3600);
   const cps = clockPauses.slice().sort((a, b) => a.at - b.at);
   // tEff = Fahrzeit inkl. vorher eingelegter Zeilen-Pausen
-  const rows = samples.map((s, i) => starts.map(st =>
-    valueAt(weather[i], arrivalTime(st, s.tEff != null ? s.tEff : s.tMin, cps))));
+  const rows = samples.map((s, i) => starts.map(st => {
+    const v = valueAt(weather[i], arrivalTime(st, s.tEff != null ? s.tEff : s.tMin, cps));
+    // rd: Windrichtung relativ zur Fahrtrichtung, woher der Wind kommt (0 = von vorn, 90 = von rechts)
+    if (v) v.rd = (v.d != null && s.bearing != null) ? ((v.d - s.bearing) % 360 + 360) % 360 : null;
+    return v;
+  }));
   return { starts, rows };
 }
 
@@ -306,20 +329,23 @@ function aggregate(cells) {
   const max = Math.max(...temps);
   const min = Math.min(...temps);
   const mean = arr => arr.reduce((a, b) => a + b, 0) / arr.length;
-  // Windrichtung: nach Stärke gewichtetes Vektormittel
-  let u = 0, n = 0;
-  for (const c of v) {
-    if (c.d == null) continue;
-    const rad = c.d * Math.PI / 180;
-    u += Math.sin(rad) * c.w; n += Math.cos(rad) * c.w;
-  }
-  const d = (u === 0 && n === 0) ? (v.find(c => c.d != null) || {}).d ?? null
-    : (Math.atan2(u, n) * 180 / Math.PI + 360) % 360;
+  // Richtungen: nach Windstärke gewichtetes Vektormittel
+  const meanDir = key => {
+    let u = 0, n = 0;
+    for (const c of v) {
+      if (c[key] == null) continue;
+      const rad = c[key] * Math.PI / 180;
+      u += Math.sin(rad) * c.w; n += Math.cos(rad) * c.w;
+    }
+    if (u === 0 && n === 0) { const f = v.find(c => c[key] != null); return f ? f[key] : null; }
+    return (Math.atan2(u, n) * 180 / Math.PI + 360) % 360;
+  };
   return {
     t: max > HOT_THRESHOLD ? max : min,
     r: mean(v.map(c => c.r)),
     w: mean(v.map(c => c.w)),
-    d
+    d: meanDir('d'),
+    rd: meanDir('rd')
   };
 }
 
@@ -343,6 +369,12 @@ function zoomMatrix(samples, matrix, zy, zx) {
     return aggregate(bucket);
   }));
   return { rowGroups, colGroups, cells };
+}
+
+/** Relative Windrichtung → einer von 8 Sektoren (0 = von vorn/oben, 2 = von rechts, 4 = von hinten/unten, 6 = von links). */
+function windSector(rd) {
+  if (rd == null) return null;
+  return Math.round(rd / 45) % 8;
 }
 
 function roundTo30(sec) { return Math.round(sec / 1800) * 1800; }
@@ -369,7 +401,7 @@ function demoRain(pointIndex, timeSec) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, arrivalTime, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
+  module.exports = { bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, arrivalTime, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
 }
 
 /* ---------- Browser-App ---------- */
@@ -533,13 +565,26 @@ if (typeof document !== 'undefined') (function () {
 
   /* ---- Darstellung ---- */
 
-  // Windkeil: Dreieck vom oberen Zellrand Richtung Mitte, breiter und länger bei mehr Wind
-  function windWedge(f) {
-    if (f <= 0) return '';
-    const half = (4 + 18 * f).toFixed(1);    // halbe Basisbreite am Rand
-    const apex = (6 + 25 * f).toFixed(1);    // Spitze, bei Maximum in der Zellmitte
-    return '<svg class="wind" width="48" height="34" viewBox="-24 0 48 34" aria-hidden="true">' +
-      '<polygon points="-' + half + ',0 ' + half + ',0 0,' + apex + '" fill="#111" stroke="#fff" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke"/></svg>';
+  // Windkeil: Dreieck vom Zellrand bzw. einer Ecke Richtung Mitte – von dort, woher der Wind
+  // relativ zur Fahrtrichtung kommt (oben = Gegenwind, unten = Rückenwind). Größer bei mehr Wind.
+  function windWedge(f, rd) {
+    const sector = windSector(rd);
+    if (f <= 0 || sector == null) return '';
+    let pts, rot;
+    if (sector % 2 === 0) {
+      // Kante: Basis auf dem Rand, Spitze Richtung Mitte; oben gezeichnet, dann gedreht
+      const half = 4 + 18 * f, len = 6 + 25 * f;
+      pts = [[-half, -34], [half, -34], [0, -34 + len]];
+      rot = sector * 45;
+    } else {
+      // Ecke: Basis auf den beiden angrenzenden Rändern, Spitze entlang der Diagonale
+      const leg = 7 + 22 * f, len = 10 + 32 * f;
+      pts = [[34 - leg, -34], [34, -34 + leg], [34 - len / Math.SQRT2, -34 + len / Math.SQRT2]];
+      rot = (sector - 1) * 45; // oben rechts gezeichnet, dann in die richtige Ecke gedreht
+    }
+    pts = pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ');
+    return '<svg class="wind" viewBox="-34 -34 68 68" preserveAspectRatio="none" aria-hidden="true">' +
+      '<polygon points="' + pts + '" transform="rotate(' + rot + ')" fill="#111" stroke="#fff" stroke-width="1.6" stroke-linejoin="round" paint-order="stroke"/></svg>';
   }
 
   function cellHtml(c, sc, r, col) {
@@ -557,7 +602,7 @@ if (typeof document !== 'undefined') (function () {
     const style = layers.length ? ' style="background-image:' + layers.join(',') + '"' : '';
     const dark = fill && fill.dark ? ' dark' : '';
     const rainTxt = c.r < 0.05 ? '0' : fmtNum1.format(c.r);
-    return '<td class="cell' + dark + '" data-r="' + r + '" data-c="' + col + '"' + style + '>' + windWedge(st.windF) +
+    return '<td class="cell' + dark + '" data-r="' + r + '" data-c="' + col + '"' + style + '>' + windWedge(st.windF, c.rd) +
       '<span class="vals"><b>' + Math.round(c.t) + '°</b><i class="vr">' + rainTxt + '</i><i class="vw">' + Math.round(c.w) + '</i></span></td>';
   }
 
