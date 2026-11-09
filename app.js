@@ -463,6 +463,22 @@ function aggregate(cells) {
   };
 }
 
+/**
+ * Routenvergleich: die ganze Route je Abfahrtsspalte in einer Zelle (Zoom-Regel),
+ * Spalten bei Bedarf zu Gruppen von zx zusammengefasst. Pausenzellen zählen nicht mit.
+ */
+function routeSummary(matrix, zx = 1) {
+  const out = [];
+  for (let c = 0; c < matrix.starts.length; c += zx) {
+    const cells = [];
+    for (let k = c; k < Math.min(matrix.starts.length, c + zx); k++) {
+      for (const row of matrix.rows) if (row[k] && !row[k].pause) cells.push(row[k]);
+    }
+    out.push({ start: matrix.starts[c], cell: aggregate(cells) });
+  }
+  return out;
+}
+
 /** Matrix zusammenfassen: je zy Zeilen und zx Spalten zu einer Zelle. */
 function zoomMatrix(samples, matrix, zy, zx) {
   const rowGroups = [];
@@ -515,7 +531,7 @@ function demoRain(pointIndex, timeSec) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { withWind, windowValues, pauseData, extractGpxText, pastePreview, mergeCloseWaypoints, bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
+  module.exports = { routeSummary, withWind, windowValues, pauseData, extractGpxText, pastePreview, mergeCloseWaypoints, bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
 }
 
 /* ---------- Browser-App ---------- */
@@ -531,6 +547,8 @@ if (typeof document !== 'undefined') (function () {
     gpxText: '',
     routes: [],        // gespeicherte Routen: { id, name, km, ascent, added, gpx, pauses, clockPauses }
     routeId: null,     // aktuelle Route
+    compare: store.get('tw.compare', '') === '1', // Routenvergleich aktiv
+    cmp: {},           // Vergleichsdaten je Route: { sampled, weather, fetchedAt, speed, gpx }
     speed: parseFloat(store.get('tw.speed', '20')) || 20,
     route: null,       // { name, points }
     sampled: null,     // { samples, totalKm, durationMin }
@@ -618,6 +636,7 @@ if (typeof document !== 'undefined') (function () {
     if (!r) return;
     try {
       const parsed = parseGpx(r.gpx);
+      setCompare(false);
       state.routeId = r.id;
       state.gpxText = r.gpx;
       state.route = parsed;
@@ -637,6 +656,9 @@ if (typeof document !== 'undefined') (function () {
 
   function deleteRoute(id) {
     state.routes = state.routes.filter(r => r.id !== id);
+    delete state.cmp[id];
+    if (state.compare && state.routes.length < 2) setCompare(false);
+    if (state.compare) { saveRoutes(); renderRouteList(); render(); return; }
     if (state.routeId === id) {
       state.routeId = state.routes[0] ? state.routes[0].id : null;
       saveRoutes();
@@ -654,13 +676,17 @@ if (typeof document !== 'undefined') (function () {
 
   function renderRouteList() {
     const list = $('routeList');
+    const cmpBtn = $('cmpBtn');
+    cmpBtn.hidden = state.routes.length < 2;
+    cmpBtn.textContent = state.compare ? 'Vergleich beenden' : 'Routen vergleichen';
+    cmpBtn.setAttribute('aria-pressed', String(!!state.compare));
     if (!state.routes.length) { list.innerHTML = '<li class="rl-empty">Noch keine Routen. Füge eine GPX ein.</li>'; return; }
     const fmtDate = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
     list.innerHTML = state.routes.slice().sort((a, b) => b.added - a.added).map(r => {
       const meta = [fmtNum1.format(r.km || 0) + ' km'];
       if (r.ascent) meta.push(r.ascent + ' hm');
       meta.push('importiert ' + fmtDate.format(new Date(r.added)));
-      const cur = r.id === state.routeId;
+      const cur = !state.compare && r.id === state.routeId;
       return '<li class="rl-item' + (cur ? ' current' : '') + '">' +
         '<button type="button" class="rl-pick" data-route="' + r.id + '"' + (cur ? ' aria-current="true"' : '') + '>' +
         '<span class="rl-name">' + esc(r.name || 'Route ohne Namen') + '</span><span class="rl-meta">' + meta.join(' · ') + '</span></button>' +
@@ -695,8 +721,15 @@ if (typeof document !== 'undefined') (function () {
       if (pick) {
         $('routePop').hidden = true;
         $('routeBtn').setAttribute('aria-expanded', 'false');
-        if (pick.dataset.route !== state.routeId) activateRoute(pick.dataset.route);
+        if (state.compare || pick.dataset.route !== state.routeId) activateRoute(pick.dataset.route);
       }
+    });
+    $('cmpBtn').addEventListener('click', e => {
+      e.stopPropagation();
+      $('routePop').hidden = true;
+      $('routeBtn').setAttribute('aria-expanded', 'false');
+      if (state.compare) { if (state.routeId) activateRoute(state.routeId); else { setCompare(false); render(); } }
+      else { closePausePop(); setCompare(true); loadCompare(); }
     });
     document.addEventListener('click', e => {
       const pop = $('routePop');
@@ -818,6 +851,122 @@ if (typeof document !== 'undefined') (function () {
     return START_COLUMNS + Math.ceil(state.sampled.durationMin / 60) + totalPauseHours() + 2;
   }
 
+  /** Stundenwerte für alle Punkte von Open-Meteo holen (mit Demo-Regen bei ?demo). */
+  async function fetchHourly(urls, expected) {
+    const results = [];
+    for (const url of urls) {
+      const res = await fetch(url);
+      if (!res.ok) {
+        let reason = res.status + ' ' + res.statusText;
+        try { const j = await res.json(); if (j && j.reason) reason = j.reason; } catch (e) { /* ignore */ }
+        throw new Error('Open-Meteo: ' + reason);
+      }
+      const data = await res.json();
+      const arr = Array.isArray(data) ? data : [data];
+      for (const d of arr) results.push(d.hourly);
+    }
+    if (results.length !== expected) throw new Error('Unerwartete Antwort von Open-Meteo.');
+    if (state.demo) {
+      results.forEach((h, i) => {
+        h.precipitation = h.precipitation.map((r, k) => Math.max(r || 0, demoRain(i, h.time[k])));
+      });
+    }
+    return results;
+  }
+
+  /* ---- Routenvergleich ---- */
+
+  function setCompare(on) {
+    state.compare = !!on && state.routes.length >= 2;
+    store.set('tw.compare', state.compare ? '1' : '');
+    document.body.classList.toggle('compare', state.compare);
+  }
+
+  async function loadCompare(force) {
+    if (!state.compare) return;
+    const todo = state.routes.filter(r => {
+      const c = state.cmp[r.id];
+      return force || !c || c.speed !== state.speed || c.gpx !== r.gpx || Date.now() - c.fetchedAt > 30 * 60 * 1000;
+    });
+    render();
+    if (!todo.length) return;
+    const silent = state.routes.every(r => state.cmp[r.id]);
+    if (!silent) setStatus('Lade Wetter für ' + todo.length + ' Routen …');
+    const errs = [];
+    await Promise.all(todo.map(async r => {
+      try {
+        const parsed = parseGpx(r.gpx);
+        const sampled = samplePoints(parsed.points, state.speed, STEP_MIN, parsed.waypoints || []);
+        const pauseH = Object.values(r.pauses || {}).reduce((a, b) => a + (b || 0), 0);
+        const hours = START_COLUMNS + Math.ceil(sampled.durationMin / 60) + pauseH + 2;
+        const weather = await fetchHourly(buildForecastUrls(sampled.samples, hours), sampled.samples.length);
+        state.cmp[r.id] = { sampled, weather, fetchedAt: Date.now(), speed: state.speed, gpx: r.gpx };
+      } catch (e) { errs.push((r.name || 'Route') + ': ' + (e.message || e)); }
+    }));
+    if (!state.compare) return;
+    setStatus(errs.length ? (navigator.onLine ? errs.join(' · ') : 'Keine Internetverbindung – Wetter konnte nicht geladen werden.') : '', !!errs.length);
+    if (silent) rerenderKeepScroll(); else render();
+  }
+
+  function renderCompare() {
+    $('empty').hidden = true;
+    $('matrixWrap').hidden = false;
+    $('toolbar').hidden = false;
+    $('estNote').hidden = true;
+    $('demoNote').hidden = !state.demo;
+    document.body.classList.add('has-data');
+    updateZoomButtons();
+    $('routeInfo').textContent = 'Vergleich · ' + state.routes.length + ' Routen';
+    $('routeInfo').title = $('routeInfo').textContent;
+
+    const nowSec = Date.now() / 1000;
+    const rows = state.routes.slice().sort((a, b) => b.added - a.added).map(r => {
+      const c = state.cmp[r.id];
+      if (!c) return { r, summary: null };
+      const samples = applyPauses(c.sampled.samples, r.pauses || {});
+      const m = buildMatrix(samples, c.weather, nowSec, START_COLUMNS, []);
+      const pauseH = Object.values(r.pauses || {}).reduce((a, b) => a + (b || 0), 0);
+      return { r, m, c, pauseH, summary: routeSummary(m, state.zx) };
+    });
+    // Skalen aus allen Fahrtzellen aller Routen
+    const allRows = rows.filter(x => x.m).flatMap(x => x.m.rows);
+    const sc = scalesFor(matrixExtremes({ rows: allRows }));
+    const ref = rows.find(x => x.summary);
+    const starts = ref ? ref.summary.map(x => x.start) : [];
+
+    let html = '<thead><tr><th class="corner" scope="col">Route · km · Dauer<br>' +
+      '<button type="button" class="info-btn" aria-label="Legende anzeigen" aria-haspopup="dialog">i</button>Abfahrt →</th>';
+    let lastDay = fmtDay.format(new Date(nowSec * 1000));
+    starts.forEach((st, idx) => {
+      const d = new Date(roundTo30(st) * 1000);
+      const day = fmtDay.format(d);
+      const dayLabel = idx === 0 ? 'jetzt' : (day !== lastDay ? day : '');
+      lastDay = day;
+      html += '<th scope="col" data-col="' + idx + '"' + (idx === 0 ? ' class="now"' : '') + '><span class="day">' + esc(dayLabel || '\u00a0') + '</span>' + fmtTime.format(d) + '</th>';
+    });
+    html += '</tr></thead><tbody>';
+    rows.forEach((x, ri) => {
+      const r = x.r;
+      const name = r.name || 'Route ohne Namen';
+      const nameCls = name.length > 44 ? ' xlong' : name.length > 22 ? ' long' : '';
+      const meta = [fmtNum1.format(r.km || 0) + ' km'];
+      if (x.c) meta.push(fmtDuration(x.c.sampled.durationMin + (x.pauseH || 0) * 60) + ' h' + (x.c.sampled.usesGpxTime ? '' : '*'));
+      html += '<tr class="cmp-row"><th scope="row" data-row="' + ri + '" data-cmproute="' + r.id + '" title="' + esc(name) + ' – antippen zum Öffnen">' +
+        '<span class="rh-name' + nameCls + '" lang="de">' + esc(name) + '</span><span class="rh-meta">' + meta.join(' · ') + '</span></th>';
+      starts.forEach((st, idx) => {
+        const cell = x.summary ? (x.summary[idx] || {}).cell : null;
+        html += cellHtml(cell || null, sc, ri, idx);
+      });
+      html += '</tr>';
+    });
+    html += '</tbody>';
+    $('matrix').innerHTML = html;
+    state.sel = null;
+    state.hover = null;
+    const thead = $('matrix').tHead;
+    if (thead) $('matrixWrap').style.setProperty('--head-h', thead.offsetHeight + 'px');
+  }
+
   // silent: ohne Statuszeile (kein Verrutschen der Matrix bei Hintergrund-Aktualisierung)
   async function fetchWeather(opts) {
     if (!state.sampled) return;
@@ -829,25 +978,8 @@ if (typeof document !== 'undefined') (function () {
     state.loading = true;
     if (!silent) setStatus('Lade Wetter für ' + samples.length + ' Punkte …');
     try {
-      const results = [];
-      for (const url of urls) {
-        const res = await fetch(url);
-        if (!res.ok) {
-          let reason = res.status + ' ' + res.statusText;
-          try { const j = await res.json(); if (j && j.reason) reason = j.reason; } catch (e) { /* ignore */ }
-          throw new Error('Open-Meteo: ' + reason);
-        }
-        const data = await res.json();
-        const arr = Array.isArray(data) ? data : [data];
-        for (const d of arr) results.push(d.hourly);
-      }
+      const results = await fetchHourly(urls, samples.length);
       if (rid !== state.routeId) return;
-      if (results.length !== samples.length) throw new Error('Unerwartete Antwort von Open-Meteo.');
-      if (state.demo) {
-        results.forEach((h, i) => {
-          h.precipitation = h.precipitation.map((r, k) => Math.max(r || 0, demoRain(i, h.time[k])));
-        });
-      }
       state.weather = results;
       state.fetchedAt = Date.now();
       state.fetchedHours = hoursNeeded;
@@ -921,6 +1053,8 @@ if (typeof document !== 'undefined') (function () {
 
 
   function render() {
+    document.body.classList.toggle('compare', !!state.compare);
+    if (state.compare && state.routes.length >= 2) { renderCompare(); return; }
     const hasData = !!(state.sampled && state.weather);
     $('empty').hidden = hasData || !!state.gpxText;
     $('matrixWrap').hidden = !hasData;
@@ -1049,6 +1183,8 @@ if (typeof document !== 'undefined') (function () {
       const info = e.target.closest && e.target.closest('.info-btn');
       if (info) { e.stopPropagation(); toggleLegend(info); return; }
       const t = e.target.closest ? e.target : null;
+      const cmpHead = t && t.closest('th[data-cmproute]');
+      if (cmpHead) { e.stopPropagation(); activateRoute(cmpHead.dataset.cmproute); return; }
       const colHead = t && (t.closest('th[data-colat]') || t.closest('th[data-pcedit]'));
       if (colHead) {
         e.stopPropagation();
@@ -1333,7 +1469,10 @@ if (typeof document !== 'undefined') (function () {
       state.speed = v;
       store.set('tw.speed', String(v));
       clearTimeout(speedTimer);
-      speedTimer = setTimeout(() => { if (state.route) { computeSamples(); fetchWeather(); } }, 600);
+      speedTimer = setTimeout(() => {
+        if (state.compare) { state.cmp = {}; loadCompare(true); }
+        if (state.route) { computeSamples(); if (!state.compare) fetchWeather(); else state.weather = null; }
+      }, 600);
     });
 
     $('fileInput').addEventListener('change', async e => {
@@ -1364,10 +1503,12 @@ if (typeof document !== 'undefined') (function () {
 
     // Beim Zurückkehren: Spalten neu ausrichten, nach 30 min Wetter neu laden
     document.addEventListener('visibilitychange', () => {
-      if (document.visibilityState !== 'visible' || !state.route) return;
+      if (document.visibilityState !== 'visible') return;
+      if (state.compare) { loadCompare(); return; }
+      if (!state.route) return;
       if (Date.now() - state.fetchedAt > 30 * 60 * 1000) fetchWeather({ silent: true }); else render();
     });
-    setInterval(() => { if (document.visibilityState === 'visible' && state.weather && !state.loading) render(); }, 5 * 60 * 1000);
+    setInterval(() => { if (document.visibilityState === 'visible' && (state.weather || state.compare) && !state.loading) rerenderKeepScroll(); }, 5 * 60 * 1000);
 
     setupPinch();
     setupSelection();
@@ -1380,8 +1521,10 @@ if (typeof document !== 'undefined') (function () {
 
     setupRoutes();
     loadRoutes();
+    const wasCompare = state.compare;
     if (state.routeId) activateRoute(state.routeId);
     else render();
+    if (wasCompare && state.routes.length >= 2) { setCompare(true); loadCompare(); }
 
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('sw.js').catch(() => { /* ignore */ });

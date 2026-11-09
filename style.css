@@ -366,3 +366,11 @@ td[data-cpkey] { cursor: pointer; }
 .rl-del { flex: none; width: 44px; font: inherit; font-size: 20px; color: var(--muted); background: transparent; border: 0; cursor: pointer; border-radius: 0 10px 10px 0; }
 .rl-del:active { background: rgba(179, 38, 30, 0.1); color: #B3261E; }
 .rl-empty { color: var(--muted); font-size: 13px; padding: 6px 2px; }
+
+/* Routenvergleich */
+.cmp-btn { width: 100%; margin: 0 0 10px; background: var(--green); color: var(--sand); border-color: var(--green); }
+.cmp-btn[aria-pressed="true"] { background: var(--card); color: var(--ink); border-color: var(--line); }
+.cmp-btn[hidden] { display: none; }
+body.compare .zoom:first-child { display: none; }
+.matrix tbody th[data-cmproute] { cursor: pointer; }
+.cmp-row .rh-name::before { display: none; }
