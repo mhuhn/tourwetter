@@ -337,3 +337,10 @@ td.na .vals { display: flex; color: var(--muted); }
 /* Nach einer Uhrzeit-Pause fehlen Abfahrten: kräftige Trennlinie */
 .matrix th.gap-after, .matrix td.gap-after { border-right: 3px solid var(--green-2); }
 @media (prefers-color-scheme: dark) { .matrix th.gap-after, .matrix td.gap-after { border-right-color: #9FD8B0; } }
+
+/* Hinweis auf eine Uhrzeit-Pause im Spaltenkopf davor (antippbar) */
+.matrix th { -webkit-tap-highlight-color: transparent; }
+.pause-tag svg { margin-right: 3px; vertical-align: -0.5px; }
+.pause-tag { display: inline-block; padding: 0 5px; border-radius: 999px; background: var(--green-2); color: #fff; font-size: 10px; font-weight: 700; letter-spacing: 0; text-transform: none; line-height: 15px; }
+@media (prefers-color-scheme: dark) { .pause-tag { background: #9FD8B0; color: #10261A; } }
+td[data-cpkey] { cursor: pointer; }

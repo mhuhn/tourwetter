@@ -416,7 +416,7 @@ function buildMatrix(samples, weather, nowSec, columns = START_COLUMNS, clockPau
       if (hit.length) {
         const h = hit.reduce((a, cp) => a + cp.h, 0);
         const v = aggregate(windowValues(weather[i], hit[0].at, h, s.bearing));
-        if (v) v.pause = true;
+        if (v) { v.pause = true; v.pauseAt = hit[0].at; }
         rows[i][c] = v;
         shift += h * 3600;
       } else {
@@ -458,7 +458,8 @@ function aggregate(cells) {
     rd: meanDir('rd'),
     hw: meanOf('hw'),
     cw: meanOf('cw'),
-    pause: v.some(c => c.pause)
+    pause: v.some(c => c.pause),
+    pauseAt: (v.find(c => c.pauseAt != null) || {}).pauseAt ?? null
   };
 }
 
@@ -799,11 +800,14 @@ if (typeof document !== 'undefined') (function () {
       const d = new Date(dc.at * 1000);
       const day = fmtDay.format(d);
       const dayLabel = dc.idx === 0 ? 'jetzt' : (day !== lastDay ? day : (dc.gapBefore ? 'n. Pause' : ''));
+      // Uhrzeit-Pause direkt nach dieser Abfahrt: sichtbar und antippbar im Kopf
+      const next = display[dc.idx + 1];
+      const ph = cps.filter(p => p.at > dc.at && p.at <= (next ? next.at : dc.at + 3600 * state.zx)).reduce((a, p) => a + p.h, 0);
       lastDay = day;
       const canEdit = state.zx === 1;
       const cls = [dc.idx === 0 ? 'now' : '', dc.gapAfter ? 'gap-after' : ''].filter(Boolean).join(' ');
       html += '<th scope="col" data-col="' + dc.idx + '"' + (canEdit ? ' data-colat="' + (dc.at + 3600) + '" data-after="' + dc.at + '"' : '') + (cls ? ' class="' + cls + '"' : '') +
-        '><span class="day">' + esc(dayLabel || '\u00a0') + '</span>' + fmtTime.format(d) + '</th>';
+        '><span class="day">' + (ph ? '<span class="pause-tag"><svg viewBox="0 0 8 10" width="6" height="8" aria-hidden="true"><rect x="0" y="0" width="2.6" height="10" rx=".6" fill="currentColor"/><rect x="5.4" y="0" width="2.6" height="10" rx=".6" fill="currentColor"/></svg>' + ph + ' h</span>' : esc(dayLabel || '\u00a0')) + '</span>' + fmtTime.format(d) + '</th>';
     });
     html += '</tr></thead><tbody>';
 
@@ -832,7 +836,8 @@ if (typeof document !== 'undefined') (function () {
         // Uhrzeit-Pause: die Zelle, in der die Pause beginnt, zeigt das Wetter an diesem Ort während der Pause
         const c = z.cells[r][dc.idx];
         const cls = [c && c.pause ? 'pz' : '', dc.gapAfter ? 'gap-after' : ''].filter(Boolean).join(' ');
-        html += cellHtml(c, sc, r, dc.idx, cls ? { cls } : undefined);
+        const attrs = c && c.pause && c.pauseAt != null && state.zx === 1 ? ' data-cpkey="' + c.pauseAt + '"' : '';
+        html += cellHtml(c, sc, r, dc.idx, cls || attrs ? { cls, attrs } : undefined);
       });
       html += '</tr>';
 
@@ -902,6 +907,8 @@ if (typeof document !== 'undefined') (function () {
       if (!p) return;
       state.sel = (state.sel && state.sel.r === p.r && state.sel.c === p.c) ? null : p;
       applySelection();
+      const tile = t && t.closest('td[data-cpkey]');
+      if (tile && state.sel) { e.stopPropagation(); openPausePop('col', +tile.dataset.cpkey, tile); }
     });
     table.addEventListener('pointerover', e => {
       if (e.pointerType !== 'mouse') return;
