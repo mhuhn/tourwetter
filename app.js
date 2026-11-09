@@ -1149,9 +1149,11 @@ if (typeof document !== 'undefined') (function () {
     starts.forEach((st, idx) => {
       const d = new Date(roundTo30(st) * 1000);
       const day = fmtDay.format(d);
-      const dayLabel = idx === 0 ? 'jetzt' : (day !== lastDay ? day : '');
+      // „jetzt“ nur, wenn die erste sichtbare Spalte wirklich die aktuelle Abfahrt ist; sonst Wochentag
+      const isNow = idx === 0 && roundTo30(st) === roundTo30(nowSec);
+      const dayLabel = isNow ? 'jetzt' : (idx === 0 || day !== lastDay ? day : '');
       lastDay = day;
-      html += '<th scope="col" data-col="' + idx + '"' + (idx === 0 ? ' class="now"' : '') + '><span class="day">' + esc(dayLabel || '\u00a0') + '</span>' + fmtTime.format(d) + '</th>';
+      html += '<th scope="col" data-col="' + idx + '"' + (isNow ? ' class="now"' : '') + '><span class="day">' + esc(dayLabel || '\u00a0') + '</span>' + fmtTime.format(d) + '</th>';
     });
     html += '</tr></thead><tbody>';
     shown.forEach((x, ri) => {
@@ -1317,7 +1319,9 @@ if (typeof document !== 'undefined') (function () {
     display.forEach(dc => {
       const d = new Date(dc.at * 1000);
       const day = fmtDay.format(d);
-      const dayLabel = dc.idx === 0 ? 'jetzt' : (day !== lastDay ? day : (dc.gapBefore ? 'n. Pause' : ''));
+      // „jetzt“ nur, wenn die erste sichtbare Spalte wirklich die aktuelle Abfahrt ist; sonst Wochentag
+      const isNow = dc.idx === 0 && dc.at === roundTo30(nowSec);
+      const dayLabel = isNow ? 'jetzt' : (dc.idx === 0 || day !== lastDay ? day : (dc.gapBefore ? 'n. Pause' : ''));
       // Uhrzeit-Pause direkt nach dieser Abfahrt: sichtbar und antippbar im Kopf
       const next = display[dc.idx + 1];
       const inGap = cps.filter(p => p.at > dc.at && p.at <= (next ? next.at : dc.at + 3600 * state.zx)).sort((a, b) => a.at - b.at);
@@ -1326,7 +1330,7 @@ if (typeof document !== 'undefined') (function () {
       const editKey = inGap.length ? inGap[0].at : dc.at + 3600;
       lastDay = day;
       const canEdit = state.zx === 1;
-      const cls = [dc.idx === 0 ? 'now' : '', dc.gapAfter ? 'gap-after' : ''].filter(Boolean).join(' ');
+      const cls = [isNow ? 'now' : '', dc.gapAfter ? 'gap-after' : ''].filter(Boolean).join(' ');
       html += '<th scope="col" data-col="' + dc.idx + '"' + (canEdit ? ' data-colat="' + editKey + '" data-after="' + dc.at + '"' : '') + (ph ? ' title="Pause bearbeiten"' : '') + (cls ? ' class="' + cls + '"' : '') +
         '><span class="day">' + (ph ? '<span class="pause-tag"><svg viewBox="0 0 8 10" width="6" height="8" aria-hidden="true"><rect x="0" y="0" width="2.6" height="10" rx=".6" fill="currentColor"/><rect x="5.4" y="0" width="2.6" height="10" rx=".6" fill="currentColor"/></svg>' + ph + ' h</span>' : esc(dayLabel || '\u00a0')) + '</span>' + fmtTime.format(d) + '</th>';
     });
