@@ -1042,6 +1042,10 @@ if (typeof document !== 'undefined') (function () {
     return '<svg class="wind" viewBox="-34 -34 68 68" preserveAspectRatio="none" aria-hidden="true">' + shapes + '</svg>';
   }
 
+  // Symbole vor Regen- und Windwert
+  const ICON_DROP = '<svg class="vi" viewBox="0 0 10 12" width="8" height="10" aria-label="Regen" role="img"><path d="M5 0.6C3.6 3 1.2 5.4 1.2 7.6a3.8 3.8 0 0 0 7.6 0C8.8 5.4 6.4 3 5 0.6z" fill="currentColor"/></svg>';
+  const ICON_WIND = '<svg class="vi" viewBox="0 0 12 10" width="10" height="9" aria-label="Wind" role="img"><path d="M1 3.2h6.3a1.6 1.6 0 1 0-1.6-1.6M1 6h8.4a1.6 1.6 0 1 1-1.6 1.6M1 8.6h3.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>';
+
   // opts: cls (zusätzliche Klassen), attrs (zusätzliche Attribute), wrap (Inhalt in .pw für Pausen-Animation)
   function cellHtml(c, sc, r, col, opts) {
     const o = opts || {};
@@ -1065,12 +1069,14 @@ if (typeof document !== 'undefined') (function () {
     const style = !isPause && bg ? ' style="' + bg + '"' : '';
     const tile = isPause ? '<div class="tile"' + (bg ? ' style="' + bg + '"' : '') + '></div>' : '';
     const dark = fill && fill.dark ? ' dark' : '';
-    // Zusammengefasste Zellen: Regensumme (Σ mm); einzelne Zellen: mm/h
-    const rainTxt = c.rsum != null
-      ? 'Σ' + (c.rsum < 0.05 ? '0' : fmtNum1.format(c.rsum))
-      : (c.r < 0.05 ? '0' : fmtNum1.format(c.r));
+    // Zusammengefasste Zellen: Regensumme (Σ mm); einzelne Zellen: mm/h. Angezeigt gerundet, 0 wird ausgeblendet.
+    const rainVal = c.rsum != null ? c.rsum : c.r;
+    const rainTxt = rainVal >= 0.05 ? (c.rsum != null ? 'Σ' : '') + fmtNum1.format(rainVal) : '';
+    const windVal = Math.round(c.w);
+    const rainHtml = rainTxt ? '<i class="vr">' + ICON_DROP + rainTxt + '</i>' : '';
+    const windHtml = windVal > 0 ? '<i class="vw">' + ICON_WIND + windVal + '</i>' : '';
     return '<td class="cell' + dark + extra + '"' + attrs + style + '>' + tile + windWedges(c, sc) +
-      wrapIn('<span class="vals"><b>' + Math.round(c.t) + '°</b><i class="vr">' + rainTxt + '</i><i class="vw">' + Math.round(c.w) + '</i></span>') + '</td>';
+      wrapIn('<span class="vals"><b>' + Math.round(c.t) + '°</b>' + rainHtml + windHtml + '</span>') + '</td>';
   }
 
 

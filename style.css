@@ -374,3 +374,7 @@ td[data-cpkey] { cursor: pointer; }
 body.compare .zoom:first-child { display: none; }
 .matrix tbody th[data-cmproute] { cursor: pointer; }
 .cmp-row .rh-name::before { display: none; }
+
+/* Symbole vor Regen- und Windwert */
+.vals i { display: inline-flex; align-items: center; gap: 2px; }
+.vals .vi { flex: none; }
