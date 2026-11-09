@@ -378,3 +378,14 @@ body.compare .zoom:first-child { display: none; }
 /* Symbole vor Regen- und Windwert */
 .vals i { display: inline-flex; align-items: center; gap: 2px; }
 .vals .vi { flex: none; }
+
+/* Tageslicht-Filter */
+.day-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  font: inherit; font-size: 13px; font-weight: 600; min-height: 36px; padding: 0 12px;
+  border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer;
+}
+.day-btn svg { color: #C98A00; }
+.day-btn[aria-pressed="true"] { background: #F6C445; border-color: #E0A800; color: #3A2A00; }
+.day-btn[aria-pressed="true"] svg { color: #3A2A00; }
+@media (prefers-color-scheme: dark) { .day-btn[aria-pressed="true"] { background: #8A6A00; border-color: #B48A00; color: #FFF4CC; } .day-btn[aria-pressed="true"] svg { color: #FFF4CC; } }

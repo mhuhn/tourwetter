@@ -528,6 +528,52 @@ function windSector(rd) {
 
 function roundTo30(sec) { return Math.round(sec / 1800) * 1800; }
 
+/**
+ * Sonnenauf- und -untergang (Unix-Sekunden) für den Tag um timeSec an lat/lon,
+ * Sonnenmittelpunkt 0,833° unter dem Horizont (wie üblich, inkl. Refraktion).
+ * Liefert null bei Polartag/-nacht.
+ */
+function sunTimes(timeSec, lat, lon) {
+  const rad = Math.PI / 180, J1970 = 2440588, J2000 = 2451545, J0 = 0.0009, e = rad * 23.4397;
+  const d = timeSec / 86400 - 0.5 + J1970 - J2000;
+  const lw = rad * -lon, phi = rad * lat;
+  const n = Math.round(d - J0 - lw / (2 * Math.PI));
+  const approx = (ht) => J0 + (ht + lw) / (2 * Math.PI) + n;
+  const ds = approx(0);
+  const M = rad * (357.5291 + 0.98560028 * ds);
+  const L = M + rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M)) + rad * 102.9372 + Math.PI;
+  const dec = Math.asin(Math.sin(e) * Math.sin(L));
+  const transit = (x) => J2000 + x + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+  const cosH = (Math.sin(-0.833 * rad) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec));
+  if (cosH < -1 || cosH > 1) return null;
+  const Jnoon = transit(ds);
+  const Jset = transit(approx(Math.acos(cosH)));
+  const Jrise = Jnoon - (Jset - Jnoon);
+  const toSec = j => (j + 0.5 - J1970) * 86400;
+  return { rise: toSec(Jrise), set: toSec(Jset) };
+}
+
+/** Liegt die Fahrt von dep (am Start) bis arr (am Ziel) vollständig zwischen Sonnenauf- und -untergang desselben Tages? */
+function inDaylight(dep, arr, start, end) {
+  const a = sunTimes(dep, start.lat, start.lon);
+  const b = sunTimes(dep, end.lat, end.lon);
+  if (!a || !b) return false;
+  return dep >= a.rise && arr <= b.set;
+}
+
+/** Matrix auf Spalten beschränken, deren Fahrt ganz im Tageslicht liegt. */
+function filterDaylight(matrix, samples) {
+  if (!samples.length) return matrix;
+  const start = samples[0], end = samples[samples.length - 1], last = samples.length - 1;
+  const keep = matrix.starts.map((st, c) => {
+    const dep = roundTo30(st);
+    const arr = matrix.leave[last][c] - st + dep;
+    return inDaylight(dep, arr, start, end);
+  });
+  const pick = arr => arr.filter((_, c) => keep[c]);
+  return { starts: pick(matrix.starts), rows: matrix.rows.map(pick), leave: matrix.leave.map(pick), keep };
+}
+
 /** Pausen (Stunden nach Punkt i) aufsummieren: liefert Samples mit tEff (Minuten inkl. Pausen). */
 function applyPauses(samples, pauses) {
   let extra = 0;
@@ -550,7 +596,7 @@ function demoRain(pointIndex, timeSec) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { routeSummary, withWind, windowValues, pauseData, extractGpxText, pastePreview, mergeCloseWaypoints, bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
+  module.exports = { sunTimes, inDaylight, filterDaylight, routeSummary, withWind, windowValues, pauseData, extractGpxText, pastePreview, mergeCloseWaypoints, bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
 }
 
 /* ---------- Browser-App ---------- */
@@ -567,6 +613,7 @@ if (typeof document !== 'undefined') (function () {
     routes: [],        // gespeicherte Routen: { id, name, km, ascent, added, gpx, pauses, clockPauses }
     routeId: null,     // aktuelle Route
     compare: store.get('tw.compare', '') === '1', // Routenvergleich aktiv
+    daylight: store.get('tw.daylight', '') === '1', // nur Abfahrten mit Fahrt ganz im Tageslicht
     cmp: {},           // Vergleichsdaten je Route: { sampled, weather, fetchedAt, speed, gpx }
     speed: parseFloat(store.get('tw.speed', '20')) || 20,
     route: null,       // { name, points }
@@ -893,6 +940,25 @@ if (typeof document !== 'undefined') (function () {
     return results;
   }
 
+  /* ---- Tageslicht-Filter ---- */
+
+  function showDaylightInfo(count) {
+    const btn = $('daylightBtn');
+    btn.setAttribute('aria-pressed', String(!!state.daylight));
+    const none = state.daylight && count === 0;
+    $('daylightNote').hidden = !none;
+  }
+
+  function setupDaylight() {
+    $('daylightBtn').addEventListener('click', () => {
+      state.daylight = !state.daylight;
+      store.set('tw.daylight', state.daylight ? '1' : '');
+      const wrap = $('matrixWrap');
+      render();
+      wrap.scrollLeft = 0;
+    });
+  }
+
   /* ---- Routenvergleich ---- */
 
   function setCompare(on) {
@@ -943,10 +1009,27 @@ if (typeof document !== 'undefined') (function () {
       const c = state.cmp[r.id];
       if (!c) return { r, summary: null };
       const samples = applyPauses(c.sampled.samples, r.pauses || {});
-      const m = buildMatrix(samples, c.weather, nowSec, START_COLUMNS, []);
+      let m = buildMatrix(samples, c.weather, nowSec, START_COLUMNS, []);
+      if (state.daylight) {
+        const f = filterDaylight(m, samples);
+        // Spalten behalten (gemeinsame Achse), nicht passende Abfahrten leeren
+        m = { starts: m.starts, leave: m.leave, rows: m.rows.map(row => row.map((v, k) => (f.keep[k] ? v : null))), keep: f.keep };
+      }
       const pauseH = Object.values(r.pauses || {}).reduce((a, b) => a + (b || 0), 0);
-      return { r, m, c, pauseH, summary: routeSummary(m, state.zx) };
+      return { r, m, c, pauseH };
     });
+    // Tageslicht: nur Abfahrten, bei denen mindestens eine Route ganz im Hellen liegt
+    const ok = rows.find(x => x.m);
+    if (state.daylight && ok) {
+      const any = ok.m.starts.map((_, k) => rows.some(x => x.m && x.m.keep[k]));
+      rows.forEach(x => {
+        if (!x.m) return;
+        const pick = a => a.filter((_, k) => any[k]);
+        x.m = { starts: pick(x.m.starts), rows: x.m.rows.map(pick), leave: x.m.leave.map(pick) };
+      });
+    }
+    rows.forEach(x => { if (x.m) x.summary = routeSummary(x.m, state.zx); });
+    showDaylightInfo(ok && ok.m ? ok.m.starts.length : 1);
     // Skalen aus allen Fahrtzellen aller Routen
     const allRows = rows.filter(x => x.m).flatMap(x => x.m.rows);
     const sc = scalesFor(matrixExtremes({ rows: allRows }));
@@ -1097,7 +1180,9 @@ if (typeof document !== 'undefined') (function () {
     const firstRounded = roundTo30(nowSec);
     for (const k of Object.keys(state.clockPauses)) if (+k <= firstRounded) { delete state.clockPauses[k]; savePauses(); }
     const cps = Object.entries(state.clockPauses).map(([at, h]) => ({ at: +at, h }));
-    const matrix = buildMatrix(samples, state.weather, nowSec, START_COLUMNS, cps);
+    let matrix = buildMatrix(samples, state.weather, nowSec, START_COLUMNS, cps);
+    if (state.daylight) matrix = filterDaylight(matrix, samples);
+    showDaylightInfo(matrix.starts.length);
     $('demoNote').hidden = !state.demo;
     const z = zoomMatrix(samples, matrix, state.zy, state.zx);
 
@@ -1106,8 +1191,11 @@ if (typeof document !== 'undefined') (function () {
     const display = z.colGroups.map((cg, idx) => {
       const at = roundTo30(cg.start);
       const next = z.colGroups[idx + 1];
-      const gapAfter = !!next && roundTo30(next.start) - at > 3600 * state.zx + 60;
-      const gapBefore = idx > 0 && at - roundTo30(z.colGroups[idx - 1].start) > 3600 * state.zx + 60;
+      // Trennlinie nur, wo eine Uhrzeit-Pause Abfahrten ausblendet (nicht bei Nacht-Lücken des Tageslicht-Filters)
+      const nextAt = next ? roundTo30(next.start) : null;
+      const prevAt = idx > 0 ? roundTo30(z.colGroups[idx - 1].start) : null;
+      const gapAfter = nextAt != null && cps.some(p => p.at > at && p.at <= nextAt) && nextAt - at > 3600 * state.zx + 60;
+      const gapBefore = prevAt != null && cps.some(p => p.at > prevAt && p.at <= at) && at - prevAt > 3600 * state.zx + 60;
       return { kind: 'col', idx, cg, at, gapAfter, gapBefore };
     });
 
@@ -1542,6 +1630,7 @@ if (typeof document !== 'undefined') (function () {
     setupSelection();
     setupLegend();
     setupPausePop();
+    setupDaylight();
 
     updateVersionInfo();
     setInterval(updateVersionInfo, 30 * 1000);
