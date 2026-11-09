@@ -217,37 +217,43 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; position: 
 @media (prefers-color-scheme: dark) { .est-note.demo { color: #9DC0FF; background: rgba(127, 176, 255, 0.16); } }
 
 .matrix tbody th[data-point] { cursor: pointer; }
-.pause-row th, .pause-row td { background: var(--sticky-bg); height: auto; padding: 0; border-bottom: 1px solid var(--line); }
-.pause-row .pi { height: 42px; padding: 0 8px 0 10px; display: flex; align-items: center; overflow: hidden; overflow: clip; transition: height 0.5s ease; }
-.pause-row.enter .pi, .pause-row.leave .pi { height: 0; }
-.pause-row td.pause-fill { background-color: var(--paper); background-image: repeating-linear-gradient(90deg, transparent 0 10px, rgba(86, 100, 90, 0.12) 10px 11px); }
-.pause-ctl { display: inline-flex; align-items: center; gap: 8px; position: sticky; left: calc(var(--rowhead-w, var(--head-w)) + 10px); }
+/* Pausen: Zellen zeigen das Wetter während der Pause, blass und gestrichelt umrandet */
+.matrix tr.pause-row > th, .matrix tr.pause-row > td { height: auto; padding: 0; }
+.matrix td.pause-col, .matrix th.pause-col-h { min-width: 0; padding: 0; }
+.pw { overflow: hidden; overflow: clip; display: flex; align-items: center; justify-content: center; }
+.pause-row .pw { height: 66px; transition: height 0.5s ease; }
+.pause-row.enter .pw, .pause-row.leave .pw { height: 0; }
+.pause-col .pw, .pause-col-h .pw { width: var(--cell-w); transition: width 0.5s ease; }
+.pause-col.enter .pw, .pause-col.leave .pw, .pause-col-h.enter .pw, .pause-col-h.leave .pw { width: 0; }
+.pause-col:not(.pause-row td) .pw { height: 66px; }
+.pause-row th .pw { justify-content: flex-start; padding: 0 8px 0 10px; }
+td.pz::after {
+  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 1;
+  background: var(--veil);
+  outline: 1.5px dashed var(--pause-line); outline-offset: -4px;
+}
+td.pz .vals { z-index: 2; }
+td.pz.show::after { background: transparent; }
+:root { --veil: rgba(250, 247, 241, 0.58); --pause-line: rgba(31, 61, 43, 0.45); }
+@media (prefers-color-scheme: dark) { :root { --veil: rgba(18, 24, 20, 0.6); --pause-line: rgba(159, 216, 176, 0.5); } }
 .pr-txt { display: flex; flex-direction: column; justify-content: center; }
-.pause-row .rh-time { color: var(--green-2); font-size: 13px; }
+.pause-row .rh-time { color: var(--green-2); font-size: 13px; font-style: italic; }
+.pause-row th[data-prowedit] { cursor: pointer; }
 @media (prefers-color-scheme: dark) { .pause-row .rh-time { color: #9FD8B0; } }
-.pause-txt { font-size: 12px; font-weight: 700; color: var(--green-2); white-space: nowrap; }
-@media (prefers-color-scheme: dark) { .pause-txt { color: #9FD8B0; } }
 .pbtn { font: inherit; font-size: 16px; font-weight: 700; width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer; padding: 0; line-height: 1; }
 .pbtn:disabled { opacity: 0.35; cursor: default; }
 
-.matrix thead th[data-colat] { cursor: pointer; }
-.matrix thead th.pause-col-h, .matrix td.pause-col { min-width: 0; width: auto; padding: 0; }
-/* kein Scroll-Container, sonst wirkt position: sticky nur innerhalb der Zelle */
-.matrix td.pause-col, .matrix td.pause-fill, .pause-row th { overflow: visible; }
-.pause-col-h .pc, .pause-col .pc { width: 46px; overflow: hidden; overflow: clip; transition: width 0.5s ease; }
-.pause-col-h.enter .pc, .pause-col-h.leave .pc, .pause-col.enter .pc, .pause-col.leave .pc { width: 0; }
-.pause-col-h .pc { display: flex; justify-content: center; }
-.pc-txt { display: block; padding: 6px 0; font-size: 13px; font-weight: 700; color: var(--green-2); white-space: nowrap; }
+.matrix thead th[data-colat], .matrix thead th[data-pcedit] { cursor: pointer; }
+.pc-txt { display: block; font-size: 15px; font-weight: 700; font-style: italic; color: var(--green-2); white-space: nowrap; }
+.pc-txt .day { font-style: normal; }
 @media (prefers-color-scheme: dark) { .pc-txt { color: #9FD8B0; } }
-.matrix td.pause-col {
-  vertical-align: top;
-  cursor: default;
-  background-color: var(--paper);
-  background-image: repeating-linear-gradient(0deg, transparent 0 10px, rgba(86, 100, 90, 0.12) 10px 11px);
-}
-/* Bedienung der Spaltenpause bleibt beim vertikalen Scrollen sichtbar */
-.pause-vctl { position: sticky; top: calc(var(--head-h, 80px) + 10px); display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 0; }
-.pause-vctl .pbtn { width: 34px; height: 34px; font-size: 17px; }
+
+/* Pausen-Editor (Infofeld am Zeilen-/Spaltenkopf) */
+.pause-pop { width: min(300px, calc(100vw - 16px)); }
+.pp-sub { margin: 0 0 12px; color: var(--muted); font-size: 12px; line-height: 1.4; }
+.pp-ctl { display: flex; align-items: center; justify-content: center; gap: 18px; }
+.pp-btn { width: 48px; height: 44px; font-size: 22px; border-radius: 12px; }
+.pp-val { min-width: 56px; text-align: center; font-size: 20px; font-weight: 800; }
 .vals { display: none; position: relative; flex-direction: column; align-items: center; gap: 0; line-height: 1.15; color: #1C2A21; background: rgba(255, 255, 255, 0.86); border-radius: 8px; padding: 2px 6px; margin: 0 auto; width: fit-content; }
 .vals b { font-size: 15px; font-weight: 800; }
 .vals i { font-style: normal; font-size: 11px; font-weight: 700; }

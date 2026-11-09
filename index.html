@@ -89,10 +89,21 @@
     </ul>
     <ul class="lp-hints">
       <li>Zelle antippen: Werte für Zeile und Spalte (°C · mm/h · km/h)</li>
-      <li>Zeilenkopf antippen: Pause nach diesem Punkt</li>
-      <li>Spaltenkopf antippen: Pause nach dieser Abfahrt</li>
+      <li>Zeilenkopf antippen: Pause nach diesem Punkt einstellen</li>
+      <li>Spaltenkopf antippen: Pause nach dieser Abfahrt einstellen</li>
+      <li>Blasse Zellen mit gestricheltem Rand: Wetter während einer Pause</li>
       <li>Pinch: Punkte bzw. Stunden zusammenfassen</li>
     </ul>
+  </div>
+
+  <div id="pausePop" class="legend-pop pause-pop" role="dialog" aria-labelledby="ppTitle" hidden>
+    <div class="lp-head"><strong id="ppTitle">Pause</strong><button type="button" class="lp-close" id="ppClose" aria-label="Schließen">×</button></div>
+    <p class="pp-sub" id="ppSub"></p>
+    <div class="pp-ctl">
+      <button type="button" class="pbtn pp-btn" id="ppMinus" aria-label="Pause um 1 Stunde kürzen">−</button>
+      <output id="ppVal" class="pp-val" aria-live="polite">0 h</output>
+      <button type="button" class="pbtn pp-btn" id="ppPlus" aria-label="Pause um 1 Stunde verlängern">+</button>
+    </div>
   </div>
 
   <dialog id="pasteDialog" class="paste-dialog">

@@ -368,23 +368,49 @@ function arrivalTime(st, tMinEff, clockPauses) {
   return arr;
 }
 
+/** Wind relativ zur Fahrtrichtung ergänzen (rd: woher, 0 = von vorn, 90 = von rechts) und in Anteile zerlegen. */
+function withWind(v, bearing) {
+  if (!v) return v;
+  v.rd = (v.d != null && bearing != null) ? ((v.d - bearing) % 360 + 360) % 360 : null;
+  // Anteile in km/h: hw > 0 Gegenwind, < 0 Rückenwind; cw > 0 von rechts, < 0 von links
+  const rad = v.rd == null ? null : v.rd * Math.PI / 180;
+  v.hw = rad == null ? null : v.w * Math.cos(rad);
+  v.cw = rad == null ? null : v.w * Math.sin(rad);
+  return v;
+}
+
+/** Stundenwerte während eines Zeitfensters (jeweils zur Mitte jeder Stunde). */
+function windowValues(series, t0, hours, bearing) {
+  const out = [];
+  for (let k = 0; k < hours; k++) out.push(withWind(valueAt(series, t0 + (k + 0.5) * 3600), bearing));
+  return out;
+}
+
+/**
+ * Wetter während der Pausen (Rohwerte, je Zelle später zusammengefasst):
+ *  row[i][c] – Zeilenpause nach Punkt i bei Abfahrt c: am Ort von i ab Ankunft für die Pausendauer
+ *  col[k][r] – Uhrzeit-Pause k: an Punkt r während des Pausenzeitraums
+ */
+function pauseData(samples, weather, starts, rowPauses, clockPauses) {
+  const cps = clockPauses.slice().sort((a, b) => a.at - b.at);
+  const row = {};
+  for (const key of Object.keys(rowPauses || {})) {
+    const i = +key, h = rowPauses[key];
+    const s = samples[i];
+    if (!h || !s || !weather[i]) continue;
+    row[i] = starts.map(st => windowValues(weather[i], arrivalTime(st, s.tEff != null ? s.tEff : s.tMin, cps), h, s.bearing));
+  }
+  const col = cps.map(cp => samples.map((s, r) => windowValues(weather[r], cp.at, cp.h, s.bearing)));
+  return { row, col, cps };
+}
+
 function buildMatrix(samples, weather, nowSec, columns = START_COLUMNS, clockPauses = []) {
   const starts = [];
   for (let h = 0; h < columns; h++) starts.push(nowSec + h * 3600);
   const cps = clockPauses.slice().sort((a, b) => a.at - b.at);
   // tEff = Fahrzeit inkl. vorher eingelegter Zeilen-Pausen
-  const rows = samples.map((s, i) => starts.map(st => {
-    const v = valueAt(weather[i], arrivalTime(st, s.tEff != null ? s.tEff : s.tMin, cps));
-    // rd: Windrichtung relativ zur Fahrtrichtung, woher der Wind kommt (0 = von vorn, 90 = von rechts)
-    if (v) {
-      v.rd = (v.d != null && s.bearing != null) ? ((v.d - s.bearing) % 360 + 360) % 360 : null;
-      // Anteile in km/h: hw > 0 Gegenwind, < 0 Rückenwind; cw > 0 von rechts, < 0 von links
-      const rad = v.rd == null ? null : v.rd * Math.PI / 180;
-      v.hw = rad == null ? null : v.w * Math.cos(rad);
-      v.cw = rad == null ? null : v.w * Math.sin(rad);
-    }
-    return v;
-  }));
+  const rows = samples.map((s, i) => starts.map(st =>
+    withWind(valueAt(weather[i], arrivalTime(st, s.tEff != null ? s.tEff : s.tMin, cps)), s.bearing)));
   return { starts, rows };
 }
 
@@ -473,7 +499,7 @@ function demoRain(pointIndex, timeSec) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { extractGpxText, pastePreview, mergeCloseWaypoints, bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, arrivalTime, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
+  module.exports = { withWind, windowValues, pauseData, extractGpxText, pastePreview, mergeCloseWaypoints, bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, arrivalTime, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
 }
 
 /* ---------- Browser-App ---------- */
@@ -497,10 +523,9 @@ if (typeof document !== 'undefined') (function () {
     loading: false,
     fetchedHours: 0,
     pauses: (() => { try { return JSON.parse(store.get('tw.pauses', '{}')) || {}; } catch (e) { return {}; } })(),
-    editRow: null,     // Index des Punkts, dessen Pausen-Editor offen ist
+    pp: null,          // offener Pausen-Editor { kind: 'row' | 'col', key }
     // Uhrzeit-Pausen: { <Unix-Sekunden der Pause>: Stunden }
     clockPauses: (() => { try { return JSON.parse(store.get('tw.clockPauses', '{}')) || {}; } catch (e) { return {}; } })(),
-    editCol: null,     // Zeitpunkt (Sekunden), dessen Spalten-Pausen-Editor offen ist
     demo: new URLSearchParams(location.search).has('demo')
   };
 
@@ -589,7 +614,6 @@ if (typeof document !== 'undefined') (function () {
       if (!gpx) throw new Error('Kein GPX erkannt. Eingefügt wurde ' + pastePreview(text) + '.');
       const route = parseGpx(gpx);
       if (gpx !== state.gpxText) { state.pauses = {}; savePauses(); }
-      state.editRow = null;
       state.gpxText = gpx;
       store.set('tw.gpx', state.gpxText);
       state.route = route;
@@ -695,8 +719,13 @@ if (typeof document !== 'undefined') (function () {
     return '<svg class="wind" viewBox="-34 -34 68 68" preserveAspectRatio="none" aria-hidden="true">' + shapes + '</svg>';
   }
 
-  function cellHtml(c, sc, r, col) {
-    if (!c) return '<td class="na" data-r="' + r + '" data-c="' + col + '"><span class="vals"><b>–</b></span></td>';
+  // opts: cls (zusätzliche Klassen), attrs (zusätzliche Attribute), wrap (Inhalt in .pw für Pausen-Animation)
+  function cellHtml(c, sc, r, col, opts) {
+    const o = opts || {};
+    const extra = o.cls ? ' ' + o.cls : '';
+    const attrs = ' data-r="' + r + '" data-c="' + col + '"' + (o.attrs || '');
+    const wrapIn = inner => o.wrap ? '<div class="pw">' + inner + '</div>' : inner;
+    if (!c) return '<td class="na' + extra + '"' + attrs + '>' + wrapIn('<span class="vals"><b>–</b></span>') + '</td>';
     const st = cellStyle(c, sc);
     const layers = [];
     if (st.rainF > 0) {
@@ -710,9 +739,10 @@ if (typeof document !== 'undefined') (function () {
     const style = layers.length ? ' style="background-image:' + layers.join(',') + '"' : '';
     const dark = fill && fill.dark ? ' dark' : '';
     const rainTxt = c.r < 0.05 ? '0' : fmtNum1.format(c.r);
-    return '<td class="cell' + dark + '" data-r="' + r + '" data-c="' + col + '"' + style + '>' + windWedges(c, sc) +
-      '<span class="vals"><b>' + Math.round(c.t) + '°</b><i class="vr">' + rainTxt + '</i><i class="vw">' + Math.round(c.w) + '</i></span></td>';
+    return '<td class="cell' + dark + extra + '"' + attrs + style + '>' + windWedges(c, sc) +
+      wrapIn('<span class="vals"><b>' + Math.round(c.t) + '°</b><i class="vr">' + rainTxt + '</i><i class="vw">' + Math.round(c.w) + '</i></span>') + '</td>';
   }
+
 
   function render() {
     const hasData = !!(state.sampled && state.weather);
@@ -734,16 +764,17 @@ if (typeof document !== 'undefined') (function () {
     const z = zoomMatrix(samples, matrix, state.zy, state.zx);
 
     // Anzeigespalten: Datenspalten, danach ggf. eine Pausenspalte
-    // (Uhrzeit-Pause zwischen dieser und der nächsten Abfahrtszeit)
+    // (Uhrzeit-Pausen zwischen dieser und der nächsten Abfahrtszeit)
+    const pd = pauseData(samples, state.weather, matrix.starts, state.pauses, cps);
     const display = [];
     z.colGroups.forEach((cg, idx) => {
       const at = roundTo30(cg.start);
       display.push({ kind: 'col', idx, cg, at });
       const next = z.colGroups[idx + 1];
       const nextAt = next ? roundTo30(next.start) : at + 3600 * state.zx;
-      const h = cps.filter(p => p.at > at && p.at <= nextAt).reduce((a, p) => a + p.h, 0);
-      const editable = state.zx === 1;
-      if (h > 0 || (editable && state.editCol === nextAt)) display.push({ kind: 'pause', at: nextAt, h, editable });
+      const ks = pd.cps.map((p, k) => (p.at > at && p.at <= nextAt ? k : -1)).filter(k => k >= 0);
+      const h = ks.reduce((a, k) => a + pd.cps[k].h, 0);
+      if (h > 0) display.push({ kind: 'pause', at: nextAt, h, ks, editable: state.zx === 1, after: at });
     });
 
     let html = '<thead><tr><th class="corner" scope="col">Fahrzeit · km · Höhe<br>' +
@@ -751,8 +782,8 @@ if (typeof document !== 'undefined') (function () {
     let lastDay = fmtDay.format(new Date(nowSec * 1000));
     display.forEach(dc => {
       if (dc.kind === 'pause') {
-        // Kopf nur beschriftet (gleiche Höhe wie die Zeit-Köpfe); Bedienung steht im Rumpf
-        html += '<th scope="col" class="pause-col-h" data-pcol="' + dc.at + '"><div class="pc"><span class="pc-txt"><span class="day">Pause</span>' + dc.h + ' h</span></div></th>';
+        html += '<th scope="col" class="pause-col-h" data-pcol="' + dc.at + '" data-col="pc' + dc.at + '"' + (dc.editable ? ' data-pcedit="' + dc.at + '" data-after="' + dc.after + '"' : '') +
+          '><div class="pw"><span class="pc-txt"><span class="day">Pause</span>' + dc.h + ' h</span></div></th>';
         return;
       }
       const d = new Date(dc.at * 1000);
@@ -760,42 +791,22 @@ if (typeof document !== 'undefined') (function () {
       const dayLabel = dc.idx === 0 ? 'jetzt' : (day !== lastDay ? day : '');
       lastDay = day;
       const canEdit = state.zx === 1;
-      html += '<th scope="col" data-col="' + dc.idx + '"' + (canEdit ? ' data-colat="' + (dc.at + 3600) + '"' : '') + (dc.idx === 0 ? ' class="now"' : '') +
+      html += '<th scope="col" data-col="' + dc.idx + '"' + (canEdit ? ' data-colat="' + (dc.at + 3600) + '" data-after="' + dc.at + '"' : '') + (dc.idx === 0 ? ' class="now"' : '') +
         '><span class="day">' + esc(dayLabel || ' ') + '</span>' + fmtTime.format(d) + '</th>';
     });
     html += '</tr></thead><tbody>';
 
+    // Farb-/Größenskalen nur aus den Fahrtzellen, damit Pausen die Entscheidungsfarben nicht verschieben
     const sc = scalesFor(matrixExtremes(matrix));
     const lastIdx = samples.length - 1;
-
-    // Zeilen-Pausen vorab bestimmen (für die Gesamtzahl der Rumpfzeilen)
-    const rowPause = z.rowGroups.map(rg => {
-      const editable = state.zy === 1 && rg.from < lastIdx;
-      let h = 0;
-      for (let i = rg.from; i < rg.to && i < lastIdx; i++) h += state.pauses[i] || 0;
-      const show = h > 0 || (editable && state.editRow === rg.from);
-      return { editable, h, show };
-    });
-    const bodyRows = z.rowGroups.length + rowPause.filter(p => p.show).length;
-
-    const colPauseCell = dc => {
-      let inner;
-      if (dc.editable) {
-        inner = '<button type="button" class="pbtn" data-cpause="' + dc.at + '" data-delta="1" aria-label="Pause um ' + fmtTime.format(new Date(dc.at * 1000)) + ' um 1 Stunde verlängern">+</button>' +
-          '<span class="pause-txt">' + dc.h + ' h</span>' +
-          '<button type="button" class="pbtn" data-cpause="' + dc.at + '" data-delta="-1" aria-label="Pause um 1 Stunde kürzen"' + (dc.h ? '' : ' disabled') + '>−</button>';
-      } else {
-        inner = '<span class="pause-txt">' + dc.h + ' h</span>';
-      }
-      return '<td class="pause-col" data-pcol="' + dc.at + '" rowspan="' + bodyRows + '"><div class="pc pause-vctl">' + inner + '</div></td>';
-    };
+    const range = (a, b) => Array.from({ length: b - a }, (_, k) => a + k);
 
     z.rowGroups.forEach((rg, r) => {
       const s = rg.sample;
       const meta = [fmtNum1.format(s.km) + ' km'];
       if (Number.isFinite(s.ele)) meta.push(Math.round(s.ele) + ' m');
-      const rp = rowPause[r];
-      const rowAttr = ' data-row="' + r + '"' + (rp.editable ? ' data-point="' + rg.from + '"' : '');
+      const editable = state.zy === 1 && rg.from < lastIdx;
+      const rowAttr = ' data-row="' + r + '"' + (editable ? ' data-point="' + rg.from + '"' : '');
       if (rg.wpt) {
         const w = rg.wpt;
         const len = w.name.length;
@@ -805,31 +816,34 @@ if (typeof document !== 'undefined') (function () {
       } else {
         html += '<tr><th scope="row"' + rowAttr + '><span class="rh-time">+' + fmtDuration(s.tEff) + '</span><span class="rh-meta">' + meta.join(' · ') + '</span></th>';
       }
+      const rowIdx = range(rg.from, rg.to);
       display.forEach(dc => {
-        if (dc.kind === 'pause') { if (r === 0) html += colPauseCell(dc); return; } // durchgehende Zelle über alle Zeilen
+        if (dc.kind === 'pause') {
+          // Uhrzeit-Pause: Wetter an diesen Punkten während des Pausenzeitraums
+          const vals = dc.ks.flatMap(k => rowIdx.flatMap(i => pd.col[k][i]));
+          html += cellHtml(aggregate(vals), sc, r, 'pc' + dc.at, { cls: 'pause-col pz', attrs: ' data-pcol="' + dc.at + '"', wrap: true });
+          return;
+        }
         html += cellHtml(z.cells[r][dc.idx], sc, r, dc.idx);
       });
       html += '</tr>';
 
-      // Zeilen-Pause: Kopf nur beschriftet, Bedienung im breiten Bereich daneben
-      if (rp.show) {
-        html += '<tr class="pause-row" data-prow="' + rg.from + '"><th scope="row"><div class="pi"><span class="pr-txt"><span class="rh-time">Pause</span><span class="rh-meta">' + rp.h + ' h</span></span></div></th>';
-        // Füllbereiche zwischen den durchgehenden Pausenspalten
-        const segs = [];
-        let n = 0;
-        display.forEach(dc => { if (dc.kind === 'pause') { if (n) segs.push(n); n = 0; } else n++; });
-        if (n) segs.push(n);
-        // Bedienung in jedem ausreichend breiten Abschnitt, damit sie beim Scrollen sichtbar bleibt
-        const wide = segs.map(c => c >= 3);
-        if (!wide.some(Boolean)) wide[0] = true;
-        segs.forEach((cnt, k) => {
-          let inner = '';
-          if (wide[k] && rp.editable) {
-            inner = '<span class="pause-ctl"><button type="button" class="pbtn" data-pause="' + rg.from + '" data-delta="-1" aria-label="Pause um 1 Stunde kürzen"' + (rp.h ? '' : ' disabled') + '>−</button>' +
-              '<span class="pause-txt">' + rp.h + ' h Pause nach diesem Punkt</span>' +
-              '<button type="button" class="pbtn" data-pause="' + rg.from + '" data-delta="1" aria-label="Pause um 1 Stunde verlängern">+</button></span>';
+      // Zeilen-Pause nach diesem Punkt (bzw. Punkten der Gruppe): Wetter am Pausenort
+      const pts = rowIdx.filter(i => i < lastIdx && state.pauses[i] > 0 && pd.row[i]);
+      const h = pts.reduce((a, i) => a + state.pauses[i], 0);
+      if (h > 0) {
+        const pr = 'p' + rg.from;
+        html += '<tr class="pause-row" data-prow="' + rg.from + '"><th scope="row" data-row="' + pr + '"' + (editable ? ' data-prowedit="' + rg.from + '"' : '') +
+          '><div class="pw"><span class="pr-txt"><span class="rh-time">Pause ' + h + ' h</span><span class="rh-meta">am Ort darüber</span></span></div></th>';
+        display.forEach(dc => {
+          let vals;
+          if (dc.kind === 'pause') {
+            vals = dc.ks.flatMap(k => pts.flatMap(i => pd.col[k][i]));
+            html += cellHtml(aggregate(vals), sc, pr, 'pc' + dc.at, { cls: 'pause-col pz', attrs: ' data-pcol="' + dc.at + '"', wrap: true });
+          } else {
+            vals = pts.flatMap(i => range(dc.cg.from, dc.cg.to).flatMap(c => pd.row[i][c]));
+            html += cellHtml(aggregate(vals), sc, pr, dc.idx, { cls: 'pz', wrap: true });
           }
-          html += '<td class="pause-fill" colspan="' + cnt + '"><div class="pi">' + inner + '</div></td>';
         });
         html += '</tr>';
       }
@@ -863,19 +877,25 @@ if (typeof document !== 'undefined') (function () {
     const table = $('matrix');
     const cellOf = e => {
       const td = e.target.closest && e.target.closest('td[data-r]');
-      return td ? { r: +td.dataset.r, c: +td.dataset.c } : null;
+      return td ? { r: td.dataset.r, c: td.dataset.c } : null;
     };
     table.addEventListener('click', e => {
       const info = e.target.closest && e.target.closest('.info-btn');
       if (info) { e.stopPropagation(); toggleLegend(info); return; }
-      const btn = e.target.closest && e.target.closest('button[data-pause]');
-      if (btn) { changePause(+btn.dataset.pause, +btn.dataset.delta); return; }
-      const cbtn = e.target.closest && e.target.closest('button[data-cpause]');
-      if (cbtn) { changeClockPause(+cbtn.dataset.cpause, +cbtn.dataset.delta); return; }
-      const colHead = e.target.closest && e.target.closest('th[data-colat]');
-      if (colHead) { toggleEditor('col', +colHead.dataset.colat); return; }
-      const head = e.target.closest && e.target.closest('th[data-point]');
-      if (head) { toggleEditor('row', +head.dataset.point); return; }
+      const t = e.target.closest ? e.target : null;
+      const colHead = t && (t.closest('th[data-colat]') || t.closest('th[data-pcedit]'));
+      if (colHead) {
+        e.stopPropagation();
+        const at = +(colHead.dataset.colat || colHead.dataset.pcedit);
+        openPausePop('col', at, colHead, +colHead.dataset.after);
+        return;
+      }
+      const rowHead = t && (t.closest('th[data-point]') || t.closest('th[data-prowedit]'));
+      if (rowHead) {
+        e.stopPropagation();
+        openPausePop('row', +(rowHead.dataset.point || rowHead.dataset.prowedit), rowHead);
+        return;
+      }
       const p = cellOf(e);
       if (!p) return;
       state.sel = (state.sel && state.sel.r === p.r && state.sel.c === p.c) ? null : p;
@@ -950,18 +970,60 @@ if (typeof document !== 'undefined') (function () {
     setTimeout(done, ANIM_MS);
   }
 
-  function toggleEditor(kind, key) {
-    const editKey = kind === 'row' ? 'editRow' : 'editCol';
-    const store_ = kind === 'row' ? state.pauses : state.clockPauses;
-    if (state[editKey] === key) {
-      // Schließen: ohne Pause verschwindet die Zeile/Spalte animiert
-      if (!store_[key]) playLeave({ kind, key }, () => { state[editKey] = null; rerenderKeepScroll(); });
-      else { state[editKey] = null; rerenderKeepScroll(); }
-      return;
+  // Pausen-Editor: kleines Infofeld am angetippten Kopf, Matrixzellen zeigen weiter das Wetter
+  function openPausePop(kind, key, anchor, after) {
+    const pop = $('pausePop');
+    if (!pop.hidden && state.pp && state.pp.kind === kind && state.pp.key === key) { closePausePop(); return; }
+    $('legendPop').hidden = true;
+    state.pp = { kind, key };
+    if (kind === 'row') {
+      const s = applyPauses(state.sampled.samples, state.pauses)[key];
+      $('ppTitle').textContent = 'Pause nach diesem Punkt';
+      $('ppSub').textContent = (s && s.name ? s.name + ' · ' : '') + 'Fahrzeit +' + fmtDuration(s ? s.tEff : 0) +
+        ' · ' + fmtNum1.format(s ? s.km : 0) + ' km. Alle folgenden Punkte werden entsprechend später erreicht.';
+    } else {
+      $('ppTitle').textContent = 'Pause um ' + fmtTime.format(new Date(key * 1000));
+      $('ppSub').textContent = 'Gilt für alle Abfahrten bis ' + fmtTime.format(new Date((Number.isFinite(after) ? after : key - 3600) * 1000)) +
+        ': Wer um ' + fmtTime.format(new Date(key * 1000)) + ' noch unterwegs ist, pausiert dort.';
     }
-    state[editKey] = key;
-    if (!store_[key]) state.anim = { kind, key };
-    rerenderKeepScroll();
+    updatePausePop();
+    pop.hidden = false;
+    const r = anchor.getBoundingClientRect();
+    const w = pop.offsetWidth, hgt = pop.offsetHeight;
+    const left = Math.max(8, Math.min(kind === 'row' ? r.right + 6 : r.left, window.innerWidth - w - 8));
+    let top = kind === 'row' ? r.top : r.bottom + 6;
+    if (top + hgt > window.innerHeight - 8) top = Math.max(8, window.innerHeight - hgt - 8);
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+  }
+
+  function updatePausePop() {
+    if (!state.pp) return;
+    const h = (state.pp.kind === 'row' ? state.pauses : state.clockPauses)[state.pp.key] || 0;
+    $('ppVal').textContent = h + ' h';
+    $('ppMinus').disabled = h <= 0;
+    $('ppPlus').disabled = h >= 24;
+  }
+
+  function closePausePop() {
+    $('pausePop').hidden = true;
+    state.pp = null;
+  }
+
+  function stepPausePop(delta) {
+    if (!state.pp) return;
+    if (state.pp.kind === 'row') changePause(state.pp.key, delta); else changeClockPause(state.pp.key, delta);
+  }
+
+  function setupPausePop() {
+    $('ppMinus').addEventListener('click', () => stepPausePop(-1));
+    $('ppPlus').addEventListener('click', () => stepPausePop(1));
+    $('ppClose').addEventListener('click', closePausePop);
+    document.addEventListener('click', e => {
+      const pop = $('pausePop');
+      if (!pop.hidden && !pop.contains(e.target)) closePausePop();
+    });
+    window.addEventListener('resize', closePausePop);
   }
 
   function changePause(i, delta) {
@@ -969,9 +1031,11 @@ if (typeof document !== 'undefined') (function () {
     const next = Math.max(0, Math.min(24, cur + delta));
     if (next === cur) return;
     if (next === 0) {
-      playLeave({ kind: 'row', key: i }, () => { delete state.pauses[i]; state.editRow = null; afterPauseChange(); });
+      state.pauses[i] = 0; updatePausePop();
+      playLeave({ kind: 'row', key: i }, () => { delete state.pauses[i]; afterPauseChange(); });
       return;
     }
+    if (!cur) state.anim = { kind: 'row', key: i };
     state.pauses[i] = next;
     afterPauseChange();
   }
@@ -981,15 +1045,18 @@ if (typeof document !== 'undefined') (function () {
     const next = Math.max(0, Math.min(24, cur + delta));
     if (next === cur) return;
     if (next === 0) {
-      playLeave({ kind: 'col', key: at }, () => { delete state.clockPauses[at]; state.editCol = null; afterPauseChange(); });
+      state.clockPauses[at] = 0; updatePausePop();
+      playLeave({ kind: 'col', key: at }, () => { delete state.clockPauses[at]; afterPauseChange(); });
       return;
     }
+    if (!cur) state.anim = { kind: 'col', key: at };
     state.clockPauses[at] = next;
     afterPauseChange();
   }
 
   function afterPauseChange() {
     savePauses();
+    updatePausePop();
     rerenderKeepScroll(); // sofort anzeigen; fehlende Stunden ggf. still nachladen
     if (hoursRequired() > state.fetchedHours && !state.loading) fetchWeather({ silent: true });
   }
@@ -1136,6 +1203,7 @@ if (typeof document !== 'undefined') (function () {
     setupPinch();
     setupSelection();
     setupLegend();
+    setupPausePop();
 
     updateVersionInfo();
     setInterval(updateVersionInfo, 30 * 1000);
