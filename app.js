@@ -367,7 +367,11 @@ function withWind(v, bearing) {
 /** Stundenwerte während eines Zeitfensters (jeweils zur Mitte jeder Stunde). */
 function windowValues(series, t0, hours, bearing) {
   const out = [];
-  for (let k = 0; k < hours; k++) out.push(withWind(valueAt(series, t0 + (k + 0.5) * 3600), bearing));
+  for (let k = 0; k < hours; k++) {
+    const v = withWind(valueAt(series, t0 + (k + 0.5) * 3600), bearing);
+    if (v) v.rmm = v.r; // Regenmenge dieser Pausenstunde (mm)
+    out.push(v);
+  }
   return out;
 }
 
@@ -381,7 +385,7 @@ function pauseData(samples, weather, matrix, rowPauses) {
     const i = +key, h = rowPauses[key];
     const s = samples[i];
     if (!h || !s || !weather[i] || !matrix.leave[i]) continue;
-    row[i] = matrix.leave[i].map(t => windowValues(weather[i], t, h, s.bearing));
+    row[i] = matrix.leave[i].map((t, c) => windowValues(weather[i], t, h, s.bearing).map(v => { if (v) v.col = c; return v; }));
   }
   return { row };
 }
@@ -404,6 +408,9 @@ function buildMatrix(samples, weather, nowSec, columns = START_COLUMNS, clockPau
   }
   const rows = samples.map(() => []);
   const leave = samples.map(() => []);
+  // Stunden Fahrzeit je Punkt: halbe Abstände zum vorherigen und nächsten Punkt
+  const tm = samples.map(s => s.tMin || 0);
+  const wh = tm.map((t, i) => ((i < tm.length - 1 ? tm[i + 1] - t : 0) + (i > 0 ? t - tm[i - 1] : 0)) / 2 / 60);
   starts.forEach((st, c) => {
     const dep = roundTo30(st);
     const pending = cps.filter(cp => cp.at > dep);
@@ -416,11 +423,13 @@ function buildMatrix(samples, weather, nowSec, columns = START_COLUMNS, clockPau
       if (hit.length) {
         const h = hit.reduce((a, cp) => a + cp.h, 0);
         const v = aggregate(windowValues(weather[i], hit[0].at, h, s.bearing));
-        if (v) { v.pause = true; v.pauseAt = hit[0].at; }
+        if (v) { v.pause = true; v.pauseAt = hit[0].at; v.rmm = v.rsum; v.col = c; }
         rows[i][c] = v;
         shift += h * 3600;
       } else {
-        rows[i][c] = withWind(valueAt(weather[i], st + t + shift), s.bearing);
+        const v = withWind(valueAt(weather[i], st + t + shift), s.bearing);
+        if (v) { v.rmm = v.r * wh[i]; v.col = c; } // Regenmenge auf diesem Abschnitt (mm)
+        rows[i][c] = v;
       }
       leave[i][c] = st + t + shift;
     });
@@ -458,6 +467,16 @@ function aggregate(cells) {
     rd: meanDir('rd'),
     hw: meanOf('hw'),
     cw: meanOf('cw'),
+    // Zahl: Regensumme in mm – je Abfahrt (Spalte) aufsummiert, über mehrere Abfahrten gemittelt
+    rsum: (() => {
+      const byCol = new Map();
+      for (const c of v) {
+        if (c.rmm == null) continue;
+        const k = c.col != null ? c.col : '_';
+        byCol.set(k, (byCol.get(k) || 0) + c.rmm);
+      }
+      return byCol.size ? mean([...byCol.values()]) : null;
+    })(),
     pause: v.some(c => c.pause),
     pauseAt: (v.find(c => c.pauseAt != null) || {}).pauseAt ?? null
   };
@@ -496,7 +515,7 @@ function zoomMatrix(samples, matrix, zy, zx) {
     for (let r = rg.from; r < rg.to; r++) {
       for (let c = cg.from; c < cg.to; c++) bucket.push(matrix.rows[r][c]);
     }
-    return aggregate(bucket);
+    return bucket.length === 1 ? bucket[0] : aggregate(bucket);
   }));
   return { rowGroups, colGroups, cells };
 }
@@ -1046,7 +1065,10 @@ if (typeof document !== 'undefined') (function () {
     const style = !isPause && bg ? ' style="' + bg + '"' : '';
     const tile = isPause ? '<div class="tile"' + (bg ? ' style="' + bg + '"' : '') + '></div>' : '';
     const dark = fill && fill.dark ? ' dark' : '';
-    const rainTxt = c.r < 0.05 ? '0' : fmtNum1.format(c.r);
+    // Zusammengefasste Zellen: Regensumme (Σ mm); einzelne Zellen: mm/h
+    const rainTxt = c.rsum != null
+      ? 'Σ' + (c.rsum < 0.05 ? '0' : fmtNum1.format(c.rsum))
+      : (c.r < 0.05 ? '0' : fmtNum1.format(c.r));
     return '<td class="cell' + dark + extra + '"' + attrs + style + '>' + tile + windWedges(c, sc) +
       wrapIn('<span class="vals"><b>' + Math.round(c.t) + '°</b><i class="vr">' + rainTxt + '</i><i class="vw">' + Math.round(c.w) + '</i></span>') + '</td>';
   }
