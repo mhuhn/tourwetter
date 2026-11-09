@@ -802,11 +802,14 @@ if (typeof document !== 'undefined') (function () {
       const dayLabel = dc.idx === 0 ? 'jetzt' : (day !== lastDay ? day : (dc.gapBefore ? 'n. Pause' : ''));
       // Uhrzeit-Pause direkt nach dieser Abfahrt: sichtbar und antippbar im Kopf
       const next = display[dc.idx + 1];
-      const ph = cps.filter(p => p.at > dc.at && p.at <= (next ? next.at : dc.at + 3600 * state.zx)).reduce((a, p) => a + p.h, 0);
+      const inGap = cps.filter(p => p.at > dc.at && p.at <= (next ? next.at : dc.at + 3600 * state.zx)).sort((a, b) => a.at - b.at);
+      const ph = inGap.reduce((a, p) => a + p.h, 0);
+      // Kopf mit Pausen-Marke: Antippen irgendwo im Kopf bearbeitet genau diese Pause
+      const editKey = inGap.length ? inGap[0].at : dc.at + 3600;
       lastDay = day;
       const canEdit = state.zx === 1;
       const cls = [dc.idx === 0 ? 'now' : '', dc.gapAfter ? 'gap-after' : ''].filter(Boolean).join(' ');
-      html += '<th scope="col" data-col="' + dc.idx + '"' + (canEdit ? ' data-colat="' + (dc.at + 3600) + '" data-after="' + dc.at + '"' : '') + (cls ? ' class="' + cls + '"' : '') +
+      html += '<th scope="col" data-col="' + dc.idx + '"' + (canEdit ? ' data-colat="' + editKey + '" data-after="' + dc.at + '"' : '') + (ph ? ' title="Pause bearbeiten"' : '') + (cls ? ' class="' + cls + '"' : '') +
         '><span class="day">' + (ph ? '<span class="pause-tag"><svg viewBox="0 0 8 10" width="6" height="8" aria-hidden="true"><rect x="0" y="0" width="2.6" height="10" rx=".6" fill="currentColor"/><rect x="5.4" y="0" width="2.6" height="10" rx=".6" fill="currentColor"/></svg>' + ph + ' h</span>' : esc(dayLabel || '\u00a0')) + '</span>' + fmtTime.format(d) + '</th>';
     });
     html += '</tr></thead><tbody>';
