@@ -297,7 +297,7 @@ function valueAt(series, ts) {
 function matrixExtremes(matrix) {
   let minT = Infinity, maxT = -Infinity, maxR = 0, maxW = 0;
   for (const row of matrix.rows) for (const c of row) {
-    if (!c) continue;
+    if (!c || c.pause) continue;
     if (c.t < minT) minT = c.t;
     if (c.t > maxT) maxT = c.t;
     if (c.r > maxR) maxR = c.r;
@@ -353,21 +353,6 @@ function tempFill(st) {
   return { css: 'rgb(' + rgb.join(',') + ')', dark: st.f > 0.55 };
 }
 
-/** Rohmatrix: Zeilen = Tourpunkte, Spalten = Abfahrtszeiten (jetzt + h Stunden). */
-/**
- * Ankunftszeit eines Punkts bei Abfahrt st: Fahrzeit inkl. Zeilen-Pausen (tEff),
- * plus Uhrzeit-Pausen [{ at, h }]: Startet die Fahrt vor `at` und wäre man nach `at` dort,
- * verschiebt sich die Ankunft um h Stunden.
- */
-function arrivalTime(st, tMinEff, clockPauses) {
-  let arr = st + tMinEff * 60;
-  const startRounded = roundTo30(st);
-  for (const cp of clockPauses || []) {
-    if (startRounded < cp.at && arr > cp.at) arr += cp.h * 3600;
-  }
-  return arr;
-}
-
 /** Wind relativ zur Fahrtrichtung ergänzen (rd: woher, 0 = von vorn, 90 = von rechts) und in Anteile zerlegen. */
 function withWind(v, bearing) {
   if (!v) return v;
@@ -387,31 +372,60 @@ function windowValues(series, t0, hours, bearing) {
 }
 
 /**
- * Wetter während der Pausen (Rohwerte, je Zelle später zusammengefasst):
- *  row[i][c] – Zeilenpause nach Punkt i bei Abfahrt c: am Ort von i ab Ankunft für die Pausendauer
- *  col[k][r] – Uhrzeit-Pause k: an Punkt r während des Pausenzeitraums
+ * Wetter während der Zeilen-Pausen (Rohwerte, je Zelle später zusammengefasst):
+ * row[i][c] – Pause nach Punkt i bei Abfahrt c: am Ort von i ab dem Weiterfahren für die Pausendauer.
  */
-function pauseData(samples, weather, starts, rowPauses, clockPauses) {
-  const cps = clockPauses.slice().sort((a, b) => a.at - b.at);
+function pauseData(samples, weather, matrix, rowPauses) {
   const row = {};
   for (const key of Object.keys(rowPauses || {})) {
     const i = +key, h = rowPauses[key];
     const s = samples[i];
-    if (!h || !s || !weather[i]) continue;
-    row[i] = starts.map(st => windowValues(weather[i], arrivalTime(st, s.tEff != null ? s.tEff : s.tMin, cps), h, s.bearing));
+    if (!h || !s || !weather[i] || !matrix.leave[i]) continue;
+    row[i] = matrix.leave[i].map(t => windowValues(weather[i], t, h, s.bearing));
   }
-  const col = cps.map(cp => samples.map((s, r) => windowValues(weather[r], cp.at, cp.h, s.bearing)));
-  return { row, col, cps };
+  return { row };
 }
 
+/**
+ * Rohmatrix: Zeilen = Tourpunkte, Spalten = Abfahrtszeiten (jetzt + h Stunden).
+ * Uhrzeit-Pausen [{ at, h }] (z. B. 12:00, 1 h):
+ *  - Abfahrten während der Pause (12:00 ≤ Abfahrt < 13:00) sind nicht möglich → Spalte entfällt.
+ *  - Bei früheren Abfahrten wird die erste Zeile, die um 12:00 oder später erreicht wird, zur Pausenzelle
+ *    (Wetter an diesem Ort während der Pause); alle folgenden Zeilen verschieben sich um die Pausendauer.
+ * leave[i][c]: Zeitpunkt, zu dem man Punkt i wieder verlässt (für Zeilen-Pausen danach).
+ */
 function buildMatrix(samples, weather, nowSec, columns = START_COLUMNS, clockPauses = []) {
+  const cps = clockPauses.filter(cp => cp.h > 0).slice().sort((a, b) => a.at - b.at);
   const starts = [];
-  for (let h = 0; h < columns; h++) starts.push(nowSec + h * 3600);
-  const cps = clockPauses.slice().sort((a, b) => a.at - b.at);
-  // tEff = Fahrzeit inkl. vorher eingelegter Zeilen-Pausen
-  const rows = samples.map((s, i) => starts.map(st =>
-    withWind(valueAt(weather[i], arrivalTime(st, s.tEff != null ? s.tEff : s.tMin, cps)), s.bearing)));
-  return { starts, rows };
+  for (let h = 0; h < columns; h++) {
+    const st = nowSec + h * 3600;
+    const dep = roundTo30(st);
+    if (!cps.some(cp => dep >= cp.at && dep < cp.at + cp.h * 3600)) starts.push(st);
+  }
+  const rows = samples.map(() => []);
+  const leave = samples.map(() => []);
+  starts.forEach((st, c) => {
+    const dep = roundTo30(st);
+    const pending = cps.filter(cp => cp.at > dep);
+    let shift = 0;
+    samples.forEach((s, i) => {
+      // tEff = Fahrzeit inkl. vorher eingelegter Zeilen-Pausen
+      const t = (s.tEff != null ? s.tEff : s.tMin) * 60;
+      const hit = [];
+      while (pending.length && dep + t + shift >= pending[0].at) hit.push(pending.shift());
+      if (hit.length) {
+        const h = hit.reduce((a, cp) => a + cp.h, 0);
+        const v = aggregate(windowValues(weather[i], hit[0].at, h, s.bearing));
+        if (v) v.pause = true;
+        rows[i][c] = v;
+        shift += h * 3600;
+      } else {
+        rows[i][c] = withWind(valueAt(weather[i], st + t + shift), s.bearing);
+      }
+      leave[i][c] = st + t + shift;
+    });
+  });
+  return { starts, rows, leave };
 }
 
 function aggregate(cells) {
@@ -443,7 +457,8 @@ function aggregate(cells) {
     d: meanDir('d'),
     rd: meanDir('rd'),
     hw: meanOf('hw'),
-    cw: meanOf('cw')
+    cw: meanOf('cw'),
+    pause: v.some(c => c.pause)
   };
 }
 
@@ -499,7 +514,7 @@ function demoRain(pointIndex, timeSec) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { withWind, windowValues, pauseData, extractGpxText, pastePreview, mergeCloseWaypoints, bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, arrivalTime, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
+  module.exports = { withWind, windowValues, pauseData, extractGpxText, pastePreview, mergeCloseWaypoints, bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
 }
 
 /* ---------- Browser-App ---------- */
@@ -767,36 +782,28 @@ if (typeof document !== 'undefined') (function () {
     $('demoNote').hidden = !state.demo;
     const z = zoomMatrix(samples, matrix, state.zy, state.zx);
 
-    // Anzeigespalten: Datenspalten, danach ggf. eine Pausenspalte
-    // (Uhrzeit-Pausen zwischen dieser und der nächsten Abfahrtszeit)
-    const pd = pauseData(samples, state.weather, matrix.starts, state.pauses, cps);
-    const display = [];
-    z.colGroups.forEach((cg, idx) => {
+    const pd = pauseData(samples, state.weather, matrix, state.pauses);
+    // Anzeigespalten; nach einer Uhrzeit-Pause fehlen Abfahrten → Trennlinie, Folgespalte „nach Pause“
+    const display = z.colGroups.map((cg, idx) => {
       const at = roundTo30(cg.start);
-      display.push({ kind: 'col', idx, cg, at });
       const next = z.colGroups[idx + 1];
-      const nextAt = next ? roundTo30(next.start) : at + 3600 * state.zx;
-      const ks = pd.cps.map((p, k) => (p.at > at && p.at <= nextAt ? k : -1)).filter(k => k >= 0);
-      const h = ks.reduce((a, k) => a + pd.cps[k].h, 0);
-      if (h > 0) display.push({ kind: 'pause', at: nextAt, h, ks, editable: state.zx === 1, after: at });
+      const gapAfter = !!next && roundTo30(next.start) - at > 3600 * state.zx + 60;
+      const gapBefore = idx > 0 && at - roundTo30(z.colGroups[idx - 1].start) > 3600 * state.zx + 60;
+      return { kind: 'col', idx, cg, at, gapAfter, gapBefore };
     });
 
     let html = '<thead><tr><th class="corner" scope="col">Fahrzeit · km · Höhe<br>' +
       '<button type="button" class="info-btn" aria-label="Legende anzeigen" aria-haspopup="dialog">i</button>Abfahrt →</th>';
     let lastDay = fmtDay.format(new Date(nowSec * 1000));
     display.forEach(dc => {
-      if (dc.kind === 'pause') {
-        html += '<th scope="col" class="pause-col-h" data-pcol="' + dc.at + '" data-col="pc' + dc.at + '"' + (dc.editable ? ' data-pcedit="' + dc.at + '" data-after="' + dc.after + '"' : '') +
-          '><div class="pw"><span class="pc-txt"><span class="day">Pause</span>' + dc.h + ' h</span></div></th>';
-        return;
-      }
       const d = new Date(dc.at * 1000);
       const day = fmtDay.format(d);
-      const dayLabel = dc.idx === 0 ? 'jetzt' : (day !== lastDay ? day : '');
+      const dayLabel = dc.idx === 0 ? 'jetzt' : (day !== lastDay ? day : (dc.gapBefore ? 'n. Pause' : ''));
       lastDay = day;
       const canEdit = state.zx === 1;
-      html += '<th scope="col" data-col="' + dc.idx + '"' + (canEdit ? ' data-colat="' + (dc.at + 3600) + '" data-after="' + dc.at + '"' : '') + (dc.idx === 0 ? ' class="now"' : '') +
-        '><span class="day">' + esc(dayLabel || ' ') + '</span>' + fmtTime.format(d) + '</th>';
+      const cls = [dc.idx === 0 ? 'now' : '', dc.gapAfter ? 'gap-after' : ''].filter(Boolean).join(' ');
+      html += '<th scope="col" data-col="' + dc.idx + '"' + (canEdit ? ' data-colat="' + (dc.at + 3600) + '" data-after="' + dc.at + '"' : '') + (cls ? ' class="' + cls + '"' : '') +
+        '><span class="day">' + esc(dayLabel || '\u00a0') + '</span>' + fmtTime.format(d) + '</th>';
     });
     html += '</tr></thead><tbody>';
 
@@ -822,13 +829,10 @@ if (typeof document !== 'undefined') (function () {
       }
       const rowIdx = range(rg.from, rg.to);
       display.forEach(dc => {
-        if (dc.kind === 'pause') {
-          // Uhrzeit-Pause: Wetter an diesen Punkten während des Pausenzeitraums
-          const vals = dc.ks.flatMap(k => rowIdx.flatMap(i => pd.col[k][i]));
-          html += cellHtml(aggregate(vals), sc, r, 'pc' + dc.at, { cls: 'pause-col pz', attrs: ' data-pcol="' + dc.at + '"', wrap: true });
-          return;
-        }
-        html += cellHtml(z.cells[r][dc.idx], sc, r, dc.idx);
+        // Uhrzeit-Pause: die Zelle, in der die Pause beginnt, zeigt das Wetter an diesem Ort während der Pause
+        const c = z.cells[r][dc.idx];
+        const cls = [c && c.pause ? 'pz' : '', dc.gapAfter ? 'gap-after' : ''].filter(Boolean).join(' ');
+        html += cellHtml(c, sc, r, dc.idx, cls ? { cls } : undefined);
       });
       html += '</tr>';
 
@@ -840,14 +844,8 @@ if (typeof document !== 'undefined') (function () {
         html += '<tr class="pause-row" data-prow="' + rg.from + '"><th scope="row" data-row="' + pr + '"' + (editable ? ' data-prowedit="' + rg.from + '"' : '') +
           '><div class="pw"><span class="pr-txt"><span class="rh-time">Pause ' + h + ' h</span><span class="rh-meta">am Ort darüber</span></span></div></th>';
         display.forEach(dc => {
-          let vals;
-          if (dc.kind === 'pause') {
-            vals = dc.ks.flatMap(k => pts.flatMap(i => pd.col[k][i]));
-            html += cellHtml(aggregate(vals), sc, pr, 'pc' + dc.at, { cls: 'pause-col pz', attrs: ' data-pcol="' + dc.at + '"', wrap: true });
-          } else {
-            vals = pts.flatMap(i => range(dc.cg.from, dc.cg.to).flatMap(c => pd.row[i][c]));
-            html += cellHtml(aggregate(vals), sc, pr, dc.idx, { cls: 'pz', wrap: true });
-          }
+          const vals = pts.flatMap(i => range(dc.cg.from, dc.cg.to).flatMap(c => pd.row[i][c]));
+          html += cellHtml(aggregate(vals), sc, pr, dc.idx, { cls: 'pz' + (dc.gapAfter ? ' gap-after' : ''), wrap: true });
         });
         html += '</tr>';
       }
@@ -986,9 +984,10 @@ if (typeof document !== 'undefined') (function () {
       $('ppSub').textContent = (s && s.name ? s.name + ' · ' : '') + 'Fahrzeit +' + fmtDuration(s ? s.tEff : 0) +
         ' · ' + fmtNum1.format(s ? s.km : 0) + ' km. Alle folgenden Punkte werden entsprechend später erreicht.';
     } else {
-      $('ppTitle').textContent = 'Pause um ' + fmtTime.format(new Date(key * 1000));
-      $('ppSub').textContent = 'Gilt für alle Abfahrten bis ' + fmtTime.format(new Date((Number.isFinite(after) ? after : key - 3600) * 1000)) +
-        ': Wer um ' + fmtTime.format(new Date(key * 1000)) + ' noch unterwegs ist, pausiert dort.';
+      const tStr = fmtTime.format(new Date(key * 1000));
+      $('ppTitle').textContent = 'Pause ab ' + tStr;
+      $('ppSub').textContent = 'Wer vorher losfährt und um ' + tStr + ' noch unterwegs ist, pausiert am dann erreichten Punkt ' +
+        '(Kachel in der Matrix); alles danach verschiebt sich. Abfahrten während der Pause entfallen.';
     }
     updatePausePop();
     pop.hidden = false;

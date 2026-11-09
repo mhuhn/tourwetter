@@ -219,13 +219,9 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; position: 
 .matrix tbody th[data-point] { cursor: pointer; }
 /* Pausen: Zellen zeigen das Wetter während der Pause, blass und gestrichelt umrandet */
 .matrix tr.pause-row > th, .matrix tr.pause-row > td { height: auto; padding: 0; }
-.matrix td.pause-col, .matrix th.pause-col-h { min-width: 0; padding: 0; }
 .pw { overflow: hidden; overflow: clip; display: flex; align-items: center; justify-content: center; }
 .pause-row .pw { height: 66px; transition: height 0.5s ease; }
 .pause-row.enter .pw, .pause-row.leave .pw { height: 0; }
-.pause-col .pw, .pause-col-h .pw { width: var(--cell-w); transition: width 0.5s ease; }
-.pause-col.enter .pw, .pause-col.leave .pw, .pause-col-h.enter .pw, .pause-col-h.leave .pw { width: 0; }
-.pause-col:not(.pause-row td) .pw { height: 66px; }
 .pause-row th .pw { justify-content: flex-start; padding: 0 8px 0 10px; }
 /* Pausenzellen: Wetterfarbe als eingerückte, abgerundete Kachel auf neutralem Sandgrund */
 .matrix td.pz { background-color: var(--pause-ground); }
@@ -337,3 +333,7 @@ td.na .vals { display: flex; color: var(--muted); }
 .lp-list, .lp-hints { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .lp-hints { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 .lp-list li { display: flex; align-items: center; }
+
+/* Nach einer Uhrzeit-Pause fehlen Abfahrten: kräftige Trennlinie */
+.matrix th.gap-after, .matrix td.gap-after { border-right: 3px solid var(--green-2); }
+@media (prefers-color-scheme: dark) { .matrix th.gap-after, .matrix td.gap-after { border-right-color: #9FD8B0; } }
