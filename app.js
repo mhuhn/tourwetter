@@ -461,6 +461,8 @@ function aggregate(cells) {
   };
   return {
     t: max > HOT_THRESHOLD ? max : min,
+    tmin: Math.min(...v.map(c => (c.tmin != null ? c.tmin : c.t))),
+    tmax: Math.max(...v.map(c => (c.tmax != null ? c.tmax : c.t))),
     r: mean(v.map(c => c.r)),
     w: mean(v.map(c => c.w)),
     d: meanDir('d'),
@@ -561,6 +563,37 @@ function inDaylight(dep, arr, start, end) {
   return dep >= a.rise && arr <= b.set;
 }
 
+/**
+ * Erfüllt eine Abfahrt die Wetterfilter? cells = alle Werte dieser Fahrt (Fahrt- und Pausenzellen).
+ * f.dry: kein Regen (gerundet 0); f.temp: alle Temperaturen (gerundet) zwischen f.lo und f.hi.
+ */
+function slotPasses(cells, f) {
+  for (const c of cells) {
+    if (!c) continue;
+    if (f.dry && (c.r >= 0.05 || (c.rsum != null && c.rsum >= 0.05))) return false;
+    if (f.temp) {
+      const lo = Math.round(c.tmin != null ? c.tmin : c.t);
+      const hi = Math.round(c.tmax != null ? c.tmax : c.t);
+      if (lo < f.lo || hi > f.hi) return false;
+    }
+  }
+  return true;
+}
+
+/** Je Abfahrt (Spalte) prüfen, ob die ganze Fahrt inkl. Zeilenpausen die Wetterfilter erfüllt. */
+function weatherKeep(matrix, pd, f) {
+  const pauseRows = Object.values((pd && pd.row) || {});
+  return matrix.starts.map((_, c) => slotPasses(matrix.rows.map(r => r[c]).concat(pauseRows.flatMap(rw => rw[c] || [])), f));
+}
+
+/** Matrix (und Pausendaten) auf die Spalten mit keep[c] beschränken. */
+function pickColumns(matrix, pd, keep) {
+  const pick = arr => arr.filter((_, c) => keep[c]);
+  const row = {};
+  for (const k of Object.keys((pd && pd.row) || {})) row[k] = pick(pd.row[k]);
+  return { matrix: { starts: pick(matrix.starts), rows: matrix.rows.map(pick), leave: matrix.leave.map(pick) }, pd: { row } };
+}
+
 /** Matrix auf Spalten beschränken, deren Fahrt ganz im Tageslicht liegt. */
 function filterDaylight(matrix, samples) {
   if (!samples.length) return matrix;
@@ -596,7 +629,7 @@ function demoRain(pointIndex, timeSec) {
 }
 
 if (typeof module !== 'undefined') {
-  module.exports = { sunTimes, inDaylight, filterDaylight, routeSummary, withWind, windowValues, pauseData, extractGpxText, pastePreview, mergeCloseWaypoints, bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
+  module.exports = { slotPasses, weatherKeep, pickColumns, sunTimes, inDaylight, filterDaylight, routeSummary, withWind, windowValues, pauseData, extractGpxText, pastePreview, mergeCloseWaypoints, bearingDeg, withBearings, windSector, parseGpx, haversineKm, routeStats, gpxTimeline, locateWaypoints, applyPauses, demoRain, samplePoints, buildForecastUrls, valueAt, buildMatrix, matrixExtremes, scalesFor, cellStyle, rampColor, tempFill, aggregate, zoomMatrix, roundTo30 };
 }
 
 /* ---------- Browser-App ---------- */
@@ -614,6 +647,10 @@ if (typeof document !== 'undefined') (function () {
     routeId: null,     // aktuelle Route
     compare: store.get('tw.compare', '') === '1', // Routenvergleich aktiv
     daylight: store.get('tw.daylight', '') === '1', // nur Abfahrten mit Fahrt ganz im Tageslicht
+    dry: store.get('tw.dry', '') === '1',            // nur Abfahrten ganz ohne Regen
+    tempOn: store.get('tw.tempOn', '') === '1',      // Temperaturbereich-Filter
+    tLo: parseInt(store.get('tw.tLo', '5'), 10),
+    tHi: parseInt(store.get('tw.tHi', '25'), 10),
     cmp: {},           // Vergleichsdaten je Route: { sampled, weather, fetchedAt, speed, gpx }
     speed: parseFloat(store.get('tw.speed', '20')) || 20,
     route: null,       // { name, points }
@@ -942,21 +979,82 @@ if (typeof document !== 'undefined') (function () {
 
   /* ---- Tageslicht-Filter ---- */
 
+  function weatherFilter() {
+    if (!state.dry && !state.tempOn) return null;
+    return { dry: state.dry, temp: state.tempOn, lo: state.tLo, hi: state.tHi };
+  }
+
   function showDaylightInfo(count) {
-    const btn = $('daylightBtn');
-    btn.setAttribute('aria-pressed', String(!!state.daylight));
-    const none = state.daylight && count === 0;
-    $('daylightNote').hidden = !none;
+    $('daylightBtn').setAttribute('aria-pressed', String(!!state.daylight));
+    $('dryBtn').setAttribute('aria-pressed', String(!!state.dry));
+    $('tempBtn').setAttribute('aria-pressed', String(!!state.tempOn));
+    $('tempBtn').title = state.tempOn ? 'Temperaturbereich ' + state.tLo + ' bis ' + state.tHi + ' °C' : 'Temperaturbereich';
+    const active = state.daylight || state.dry || state.tempOn;
+    $('daylightNote').hidden = !(active && count === 0);
+  }
+
+  function updateTempPop() {
+    $('tLo').value = state.tLo; $('tHi').value = state.tHi;
+    $('tLoVal').textContent = state.tLo + ' °C';
+    $('tHiVal').textContent = state.tHi + ' °C';
+    $('tempOff').hidden = !state.tempOn;
+  }
+
+  let filterFrame = 0;
+  function rerenderFilters() {
+    cancelAnimationFrame(filterFrame);
+    filterFrame = requestAnimationFrame(() => { render(); });
   }
 
   function setupDaylight() {
     $('daylightBtn').addEventListener('click', () => {
       state.daylight = !state.daylight;
       store.set('tw.daylight', state.daylight ? '1' : '');
-      const wrap = $('matrixWrap');
       render();
-      wrap.scrollLeft = 0;
+      $('matrixWrap').scrollLeft = 0;
     });
+    $('dryBtn').addEventListener('click', () => {
+      state.dry = !state.dry;
+      store.set('tw.dry', state.dry ? '1' : '');
+      render();
+      $('matrixWrap').scrollLeft = 0;
+    });
+    // Temperatur: Knopf aktiviert den Filter und zeigt die Regler
+    $('tempBtn').addEventListener('click', e => {
+      e.stopPropagation();
+      const pop = $('tempPop');
+      if (!pop.hidden) { pop.hidden = true; return; }
+      $('legendPop').hidden = true;
+      if (!state.tempOn) { state.tempOn = true; store.set('tw.tempOn', '1'); render(); $('matrixWrap').scrollLeft = 0; }
+      updateTempPop();
+      pop.hidden = false;
+      const r = $('tempBtn').getBoundingClientRect();
+      const w = pop.offsetWidth;
+      pop.style.left = Math.max(8, Math.min(r.right - w, window.innerWidth - w - 8)) + 'px';
+      pop.style.top = (r.bottom + 6) + 'px';
+    });
+    const onSlide = which => () => {
+      let lo = parseInt($('tLo').value, 10), hi = parseInt($('tHi').value, 10);
+      if (lo > hi) { if (which === 'lo') hi = lo; else lo = hi; }
+      state.tLo = lo; state.tHi = hi;
+      store.set('tw.tLo', String(lo)); store.set('tw.tHi', String(hi));
+      updateTempPop();
+      showDaylightInfo(1);
+      rerenderFilters();
+    };
+    $('tLo').addEventListener('input', onSlide('lo'));
+    $('tHi').addEventListener('input', onSlide('hi'));
+    $('tempOff').addEventListener('click', () => {
+      state.tempOn = false; store.set('tw.tempOn', '');
+      $('tempPop').hidden = true;
+      render();
+    });
+    $('tempClose').addEventListener('click', () => { $('tempPop').hidden = true; });
+    document.addEventListener('click', e => {
+      const pop = $('tempPop');
+      if (!pop.hidden && !pop.contains(e.target)) pop.hidden = true;
+    });
+    window.addEventListener('resize', () => { $('tempPop').hidden = true; });
   }
 
   /* ---- Routenvergleich ---- */
@@ -1010,17 +1108,20 @@ if (typeof document !== 'undefined') (function () {
       if (!c) return { r, summary: null };
       const samples = applyPauses(c.sampled.samples, r.pauses || {});
       let m = buildMatrix(samples, c.weather, nowSec, START_COLUMNS, []);
-      if (state.daylight) {
-        const f = filterDaylight(m, samples);
+      const wf = weatherFilter();
+      if (state.daylight || wf) {
+        const keepD = state.daylight ? filterDaylight(m, samples).keep : m.starts.map(() => true);
+        const keepW = wf ? weatherKeep(m, pauseData(samples, c.weather, m, r.pauses || {}), wf) : m.starts.map(() => true);
+        const keep = keepD.map((k, i) => k && keepW[i]);
         // Spalten behalten (gemeinsame Achse), nicht passende Abfahrten leeren
-        m = { starts: m.starts, leave: m.leave, rows: m.rows.map(row => row.map((v, k) => (f.keep[k] ? v : null))), keep: f.keep };
+        m = { starts: m.starts, leave: m.leave, rows: m.rows.map(row => row.map((v, k) => (keep[k] ? v : null))), keep };
       }
       const pauseH = Object.values(r.pauses || {}).reduce((a, b) => a + (b || 0), 0);
       return { r, m, c, pauseH };
     });
-    // Tageslicht: nur Abfahrten, bei denen mindestens eine Route ganz im Hellen liegt
+    // Filter: nur Abfahrten, bei denen mindestens eine Route passt
     const ok = rows.find(x => x.m);
-    if (state.daylight && ok) {
+    if (ok && ok.m.keep) {
       const any = ok.m.starts.map((_, k) => rows.some(x => x.m && x.m.keep[k]));
       rows.forEach(x => {
         if (!x.m) return;
@@ -1182,11 +1283,16 @@ if (typeof document !== 'undefined') (function () {
     const cps = Object.entries(state.clockPauses).map(([at, h]) => ({ at: +at, h }));
     let matrix = buildMatrix(samples, state.weather, nowSec, START_COLUMNS, cps);
     if (state.daylight) matrix = filterDaylight(matrix, samples);
+    let pd = pauseData(samples, state.weather, matrix, state.pauses);
+    const wf = weatherFilter();
+    if (wf) {
+      const f = pickColumns(matrix, pd, weatherKeep(matrix, pd, wf));
+      matrix = f.matrix; pd = f.pd;
+    }
     showDaylightInfo(matrix.starts.length);
     $('demoNote').hidden = !state.demo;
     const z = zoomMatrix(samples, matrix, state.zy, state.zx);
 
-    const pd = pauseData(samples, state.weather, matrix, state.pauses);
     // Anzeigespalten; nach einer Uhrzeit-Pause fehlen Abfahrten → Trennlinie, Folgespalte „nach Pause“
     const display = z.colGroups.map((cg, idx) => {
       const at = roundTo30(cg.start);

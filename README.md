@@ -21,7 +21,7 @@ PWA, die für eine GPX-Route das Wetter entlang der Strecke für verschiedene Ab
    - **Spalten:** Abfahrt jetzt, +1 h, … +47 h (Kopf auf 30 min gerundet).
    Im Querformat auf dem Smartphone werden Kopf- und Werkzeugleiste ausgeblendet, damit die volle Höhe den Matrixzeilen gehört.
    Legende und Bedienhinweise öffnen sich über das „i“ in der linken oberen Ecke der Matrix.
-   **Nur Tageslicht** (Werkzeugleiste): zeigt nur Abfahrten, bei denen die ganze Fahrt inkl. Pausen zwischen Sonnenaufgang am Start und Sonnenuntergang am Ziel desselben Tages liegt (Sonnenzeiten werden lokal berechnet). Im Routenvergleich bleibt eine Abfahrt, wenn mindestens eine Route passt; die anderen Zellen bleiben leer.
+   **Filter** (Symbole neben „Stunden“): Sonne = ganze Fahrt inkl. Pausen zwischen Sonnenaufgang am Start und Sonnenuntergang am Ziel (lokal berechnet); durchgestrichener Tropfen = gar kein Regen; Thermometer = alle Temperaturen der Fahrt inkl. Pausen im eingestellten Bereich (Regler erscheinen nach Antippen). Filter lassen sich kombinieren; im Routenvergleich bleibt eine Abfahrt, wenn mindestens eine Route passt.
 4. Zoomen per Pinch (Finger übereinander: Punkte, nebeneinander: Stunden) oder über die Buttons 1×/2×/4×/8×.
    Beim Zusammenfassen gilt: liegt das Maximum über 22 °C, wird die höchste Temperatur gezeigt, sonst die niedrigste; Regen und Wind werden gemittelt (Darstellung); als Zahl zeigen zusammengefasste Zellen, Pausen und der Routenvergleich beim Regen die Summe „Σ“ in mm – je Abfahrt über den zusammengefassten Abschnitt aufsummiert (jeder Punkt mit seiner Fahrzeit), über mehrere Abfahrten gemittelt.
 

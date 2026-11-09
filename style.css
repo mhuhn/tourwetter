@@ -371,7 +371,7 @@ td[data-cpkey] { cursor: pointer; }
 .cmp-btn { width: 100%; margin: 0 0 10px; background: var(--green); color: var(--sand); border-color: var(--green); }
 .cmp-btn[aria-pressed="true"] { background: var(--card); color: var(--ink); border-color: var(--line); }
 .cmp-btn[hidden] { display: none; }
-body.compare .zoom:first-child { display: none; }
+body.compare .toolbar > .zoom:first-child { display: none; }
 .matrix tbody th[data-cmproute] { cursor: pointer; }
 .cmp-row .rh-name::before { display: none; }
 
@@ -379,13 +379,30 @@ body.compare .zoom:first-child { display: none; }
 .vals i { display: inline-flex; align-items: center; gap: 2px; }
 .vals .vi { flex: none; }
 
-/* Tageslicht-Filter */
-.day-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  font: inherit; font-size: 13px; font-weight: 600; min-height: 36px; padding: 0 12px;
-  border-radius: 9px; border: 1px solid var(--line); background: var(--card); color: var(--ink); cursor: pointer;
+/* Filter-Knöpfe neben den Stunden-Buttons */
+.tb-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.filters { display: flex; gap: 4px; }
+.fbtn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  min-width: 38px; height: 36px; padding: 0 8px; border-radius: 9px;
+  font: inherit; font-size: 12px; font-weight: 700;
+  border: 1px solid var(--line); background: var(--card); color: var(--muted); cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }
-.day-btn svg { color: #C98A00; }
-.day-btn[aria-pressed="true"] { background: #F6C445; border-color: #E0A800; color: #3A2A00; }
-.day-btn[aria-pressed="true"] svg { color: #3A2A00; }
-@media (prefers-color-scheme: dark) { .day-btn[aria-pressed="true"] { background: #8A6A00; border-color: #B48A00; color: #FFF4CC; } .day-btn[aria-pressed="true"] svg { color: #FFF4CC; } }
+.f-sun svg { color: #C98A00; }
+.f-dry svg { color: #2F6FD0; }
+.f-temp svg { color: #C9561F; }
+.fbtn[aria-pressed="true"] { background: var(--green); border-color: var(--green); color: var(--sand); }
+.fbtn[aria-pressed="true"] svg { color: var(--sand); }
+.f-sun[aria-pressed="true"] { background: #F6C445; border-color: #E0A800; }
+.f-sun[aria-pressed="true"] svg { color: #3A2A00; }
+.fbtn-val:empty { display: none; }
+@media (prefers-color-scheme: dark) { .f-sun[aria-pressed="true"] { background: #8A6A00; border-color: #B48A00; } .f-sun[aria-pressed="true"] svg { color: #FFF4CC; } }
+
+/* Temperaturbereich */
+.temp-pop { width: min(300px, calc(100vw - 16px)); }
+.slider { display: grid; grid-template-columns: 1fr auto; align-items: center; gap: 2px 8px; margin: 6px 0 10px; font-size: 13px; }
+.slider output { font-weight: 800; }
+.slider input { grid-column: 1 / -1; width: 100%; height: 32px; accent-color: var(--green-2); }
+.temp-off { width: 100%; min-height: 40px; font-size: 14px; }
+.temp-off[hidden] { display: none; }

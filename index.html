@@ -52,18 +52,27 @@
       <button type="button" data-axis="y" data-level="4">4×</button>
       <button type="button" data-axis="y" data-level="8">8×</button>
     </div>
-    <div class="zoom" role="group" aria-label="Stunden zusammenfassen">
-      <span class="zoom-label">Stunden</span>
-      <button type="button" data-axis="x" data-level="1">1×</button>
-      <button type="button" data-axis="x" data-level="2">2×</button>
-      <button type="button" data-axis="x" data-level="4">4×</button>
-      <button type="button" data-axis="x" data-level="8">8×</button>
+    <div class="tb-row">
+      <div class="zoom" role="group" aria-label="Stunden zusammenfassen">
+        <span class="zoom-label">Stunden</span>
+        <button type="button" data-axis="x" data-level="1">1×</button>
+        <button type="button" data-axis="x" data-level="2">2×</button>
+        <button type="button" data-axis="x" data-level="4">4×</button>
+        <button type="button" data-axis="x" data-level="8">8×</button>
+      </div>
+      <div class="filters" role="group" aria-label="Abfahrten filtern">
+        <button type="button" id="daylightBtn" class="fbtn f-sun" aria-pressed="false" aria-label="Nur Tageslicht" title="Nur Tageslicht">
+          <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><circle cx="10" cy="10" r="3.6" fill="currentColor"/><path d="M10 1.5v2.6M10 15.9v2.6M1.5 10h2.6M15.9 10h2.6M4 4l1.8 1.8M14.2 14.2L16 16M4 16l1.8-1.8M14.2 5.8L16 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <button type="button" id="dryBtn" class="fbtn f-dry" aria-pressed="false" aria-label="Nur trocken" title="Nur trocken (kein Regen)">
+          <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M10 2.2C8.2 5.2 5 8.3 5 11.4a5 5 0 0 0 10 0c0-3.1-3.2-6.2-5-9.2z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M3.5 3.5l13 13" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+        </button>
+        <button type="button" id="tempBtn" class="fbtn f-temp" aria-pressed="false" aria-haspopup="dialog" aria-controls="tempPop" aria-label="Temperaturbereich" title="Temperaturbereich">
+          <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M8 3.5a2 2 0 0 1 4 0v8a3.6 3.6 0 1 1-4 0z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="10" cy="14.5" r="1.7" fill="currentColor"/><path d="M10 7.5v6" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+        </button>
+      </div>
     </div>
-    <button type="button" id="daylightBtn" class="day-btn" aria-pressed="false">
-      <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="10" cy="10" r="3.6" fill="currentColor"/><path d="M10 1.5v2.6M10 15.9v2.6M1.5 10h2.6M15.9 10h2.6M4 4l1.8 1.8M14.2 14.2L16 16M4 16l1.8-1.8M14.2 5.8L16 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
-      Nur Tageslicht
-    </button>
-    <p id="daylightNote" class="est-note" hidden>Keine Abfahrt in den nächsten 48 h liegt ganz im Tageslicht</p>
+    <p id="daylightNote" class="est-note" hidden>Keine Abfahrt in den nächsten 48 h erfüllt die Filter</p>
     <p id="estNote" class="est-note" hidden></p>
     <p id="demoNote" class="est-note demo" hidden>Demo: Regen simuliert</p>
   </div>
@@ -87,6 +96,16 @@
     <ul id="routeList" class="route-list"></ul>
   </div>
 
+  <div id="tempPop" class="legend-pop temp-pop" role="dialog" aria-label="Temperaturbereich" hidden>
+    <div class="lp-head"><strong>Temperaturbereich</strong><button type="button" class="lp-close" id="tempClose" aria-label="Schließen">×</button></div>
+    <p class="pp-sub">Nur Abfahrten, bei denen alle Temperaturen der Fahrt (inkl. Pausen) in diesem Bereich liegen.</p>
+    <label class="slider"><span>Mindestens</span><output id="tLoVal">5 °C</output>
+      <input type="range" id="tLo" min="-15" max="40" step="1" value="5"></label>
+    <label class="slider"><span>Höchstens</span><output id="tHiVal">25 °C</output>
+      <input type="range" id="tHi" min="-15" max="40" step="1" value="25"></label>
+    <button type="button" id="tempOff" class="btn temp-off">Temperaturfilter ausschalten</button>
+  </div>
+
   <div id="legendPop" class="legend-pop" role="dialog" aria-label="Legende" hidden>
     <div class="lp-head"><strong>Legende</strong><button type="button" class="lp-close" id="legendClose" aria-label="Legende schließen">×</button></div>
     <p class="lp-notes" id="lpNotes"></p>
@@ -105,7 +124,7 @@
       <li>Bestehende Uhrzeit-Pause ändern: Spaltenkopf mit Pausen-Marke oder eine Pausenkachel antippen</li>
       <li>Eingerückte Kacheln auf Sandgrund: Wetter während einer Pause</li>
       <li>Pinch: Punkte bzw. Stunden zusammenfassen</li>
-      <li>„Nur Tageslicht“: nur Abfahrten, bei denen die ganze Fahrt (inkl. Pausen) zwischen Sonnenaufgang am Start und Sonnenuntergang am Ziel liegt</li>
+      <li>Filter neben „Stunden“: Sonne = ganze Fahrt (inkl. Pausen) zwischen Sonnenauf- und -untergang; durchgestrichener Tropfen = gar kein Regen; Thermometer = alle Temperaturen im eingestellten Bereich</li>
       <li>Routenvergleich (links oben): eine Zeile pro Route, jede Zelle fasst die ganze Tour bei dieser Abfahrt zusammen; Routennamen antippen öffnet die Route</li>
     </ul>
   </div>
