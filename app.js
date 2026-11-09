@@ -528,7 +528,9 @@ if (typeof document !== 'undefined') (function () {
   };
 
   const state = {
-    gpxText: store.get('tw.gpx', ''),
+    gpxText: '',
+    routes: [],        // gespeicherte Routen: { id, name, km, ascent, added, gpx, pauses, clockPauses }
+    routeId: null,     // aktuelle Route
     speed: parseFloat(store.get('tw.speed', '20')) || 20,
     route: null,       // { name, points }
     sampled: null,     // { samples, totalKm, durationMin }
@@ -538,10 +540,10 @@ if (typeof document !== 'undefined') (function () {
     zx: parseInt(store.get('tw.zx', '1'), 10) || 1,
     loading: false,
     fetchedHours: 0,
-    pauses: (() => { try { return JSON.parse(store.get('tw.pauses', '{}')) || {}; } catch (e) { return {}; } })(),
+    pauses: {},
     pp: null,          // offener Pausen-Editor { kind: 'row' | 'col', key }
     // Uhrzeit-Pausen: { <Unix-Sekunden der Pause>: Stunden }
-    clockPauses: (() => { try { return JSON.parse(store.get('tw.clockPauses', '{}')) || {}; } catch (e) { return {}; } })(),
+    clockPauses: {},
     demo: new URLSearchParams(location.search).has('demo')
   };
 
@@ -549,9 +551,158 @@ if (typeof document !== 'undefined') (function () {
     const sum = o => Object.values(o).reduce((a, b) => a + (b || 0), 0);
     return sum(state.pauses) + sum(state.clockPauses);
   }
+  /* ---- Gespeicherte Routen (lokal) ---- */
+
+  function readJSON(key, def) { try { const v = JSON.parse(store.get(key, '')); return v == null ? def : v; } catch (e) { return def; } }
+
+  function loadRoutes() {
+    state.routes = readJSON('tw.routes', []);
+    if (!Array.isArray(state.routes)) state.routes = [];
+    // Übernahme aus der Version mit nur einer Route
+    const legacy = store.get('tw.gpx', '');
+    if (!state.routes.length && legacy) {
+      try {
+        const r = parseGpx(legacy);
+        state.routes.push(makeRoute(legacy, r, readJSON('tw.pauses', {}), readJSON('tw.clockPauses', {})));
+        saveRoutes();
+      } catch (e) { /* ignorieren */ }
+    }
+    try { localStorage.removeItem('tw.gpx'); localStorage.removeItem('tw.pauses'); localStorage.removeItem('tw.clockPauses'); } catch (e) { /* ignore */ }
+    const cur = store.get('tw.route', '');
+    state.routeId = state.routes.some(r => r.id === cur) ? cur : (state.routes[0] ? state.routes[0].id : null);
+  }
+
+  function makeRoute(gpx, parsed, pauses, clockPauses) {
+    const st = routeStats(parsed.points);
+    return {
+      id: 'r' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+      name: parsed.name || '',
+      km: st.totalKm,
+      ascent: st.ascent,
+      added: Date.now(),
+      gpx,
+      pauses: pauses || {},
+      clockPauses: clockPauses || {}
+    };
+  }
+
+  // Speichern; passt der Speicher nicht, werden die ältesten anderen Routen verworfen
+  function saveRoutes() {
+    for (;;) {
+      try {
+        localStorage.setItem('tw.routes', JSON.stringify(state.routes));
+        if (state.routeId) localStorage.setItem('tw.route', state.routeId);
+        return;
+      } catch (e) {
+        const others = state.routes.filter(r => r.id !== state.routeId);
+        if (!others.length) return;
+        const oldest = others.reduce((a, b) => (a.added <= b.added ? a : b));
+        state.routes = state.routes.filter(r => r !== oldest);
+        setStatus('Speicher voll – älteste Route „' + (oldest.name || 'ohne Namen') + '“ wurde entfernt.', true);
+      }
+    }
+  }
+
+  function currentRoute() { return state.routes.find(r => r.id === state.routeId) || null; }
+
   function savePauses() {
-    store.set('tw.pauses', JSON.stringify(state.pauses));
-    store.set('tw.clockPauses', JSON.stringify(state.clockPauses));
+    const r = currentRoute();
+    if (!r) return;
+    r.pauses = state.pauses;
+    r.clockPauses = state.clockPauses;
+    saveRoutes();
+  }
+
+  function activateRoute(id) {
+    const r = state.routes.find(x => x.id === id);
+    if (!r) return;
+    try {
+      const parsed = parseGpx(r.gpx);
+      state.routeId = r.id;
+      state.gpxText = r.gpx;
+      state.route = parsed;
+      state.pauses = r.pauses || {};
+      state.clockPauses = r.clockPauses || {};
+      state.weather = null;
+      state.sel = null;
+      store.set('tw.route', r.id);
+      closePausePop();
+      computeSamples();
+      render();
+      fetchWeather();
+    } catch (e) {
+      setStatus(e.message || String(e), true);
+    }
+  }
+
+  function deleteRoute(id) {
+    state.routes = state.routes.filter(r => r.id !== id);
+    if (state.routeId === id) {
+      state.routeId = state.routes[0] ? state.routes[0].id : null;
+      saveRoutes();
+      if (state.routeId) activateRoute(state.routeId);
+      else {
+        try { localStorage.removeItem('tw.route'); } catch (e) { /* ignore */ }
+        state.gpxText = ''; state.route = null; state.sampled = null; state.weather = null;
+        $('routeInfo').textContent = 'Keine Route geladen';
+        $('estNote').hidden = true;
+        render();
+      }
+    } else saveRoutes();
+    renderRouteList();
+  }
+
+  function renderRouteList() {
+    const list = $('routeList');
+    if (!state.routes.length) { list.innerHTML = '<li class="rl-empty">Noch keine Routen. Füge eine GPX ein.</li>'; return; }
+    const fmtDate = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    list.innerHTML = state.routes.slice().sort((a, b) => b.added - a.added).map(r => {
+      const meta = [fmtNum1.format(r.km || 0) + ' km'];
+      if (r.ascent) meta.push(r.ascent + ' hm');
+      meta.push('importiert ' + fmtDate.format(new Date(r.added)));
+      const cur = r.id === state.routeId;
+      return '<li class="rl-item' + (cur ? ' current' : '') + '">' +
+        '<button type="button" class="rl-pick" data-route="' + r.id + '"' + (cur ? ' aria-current="true"' : '') + '>' +
+        '<span class="rl-name">' + esc(r.name || 'Route ohne Namen') + '</span><span class="rl-meta">' + meta.join(' · ') + '</span></button>' +
+        '<button type="button" class="rl-del" data-del="' + r.id + '" aria-label="Route „' + esc(r.name || 'ohne Namen') + '“ löschen">×</button></li>';
+    }).join('');
+  }
+
+  function toggleRoutePop() {
+    const pop = $('routePop');
+    if (!pop.hidden) { pop.hidden = true; $('routeBtn').setAttribute('aria-expanded', 'false'); return; }
+    $('legendPop').hidden = true;
+    closePausePop();
+    renderRouteList();
+    pop.hidden = false;
+    $('routeBtn').setAttribute('aria-expanded', 'true');
+    const r = $('routeBtn').getBoundingClientRect();
+    pop.style.left = Math.max(8, r.left) + 'px';
+    pop.style.top = (r.bottom + 6) + 'px';
+  }
+
+  function setupRoutes() {
+    $('routeBtn').addEventListener('click', e => { e.stopPropagation(); toggleRoutePop(); });
+    $('routeList').addEventListener('click', e => {
+      const del = e.target.closest('[data-del]');
+      if (del) {
+        e.stopPropagation();
+        const r = state.routes.find(x => x.id === del.dataset.del);
+        if (r && window.confirm('Route „' + (r.name || 'ohne Namen') + '“ löschen?')) deleteRoute(r.id);
+        return;
+      }
+      const pick = e.target.closest('[data-route]');
+      if (pick) {
+        $('routePop').hidden = true;
+        $('routeBtn').setAttribute('aria-expanded', 'false');
+        if (pick.dataset.route !== state.routeId) activateRoute(pick.dataset.route);
+      }
+    });
+    document.addEventListener('click', e => {
+      const pop = $('routePop');
+      if (!pop.hidden && !pop.contains(e.target)) { pop.hidden = true; $('routeBtn').setAttribute('aria-expanded', 'false'); }
+    });
+    window.addEventListener('resize', () => { $('routePop').hidden = true; });
   }
 
   const fmtTime = new Intl.DateTimeFormat('de-DE', { hour: '2-digit', minute: '2-digit' });
@@ -629,12 +780,15 @@ if (typeof document !== 'undefined') (function () {
       const gpx = extractGpxText(text);
       if (!gpx) throw new Error('Kein GPX erkannt. Eingefügt wurde ' + pastePreview(text) + '.');
       const route = parseGpx(gpx);
-      if (gpx !== state.gpxText) { state.pauses = {}; savePauses(); }
-      state.gpxText = gpx;
-      store.set('tw.gpx', state.gpxText);
-      state.route = route;
-      computeSamples();
-      fetchWeather();
+      // Neue Route vorne in die Liste; bereits bekannte Route (gleiche GPX) nur wieder auswählen
+      let r = state.routes.find(x => x.gpx === gpx);
+      if (!r) {
+        r = makeRoute(gpx, route);
+        state.routes.push(r);
+        state.routeId = r.id;
+        saveRoutes();
+      }
+      activateRoute(r.id);
     } catch (e) {
       setStatus(e.message || String(e), true);
     }
@@ -669,6 +823,7 @@ if (typeof document !== 'undefined') (function () {
     if (!state.sampled) return;
     const silent = !!(opts && opts.silent) && !!state.weather;
     const { samples } = state.sampled;
+    const rid = state.routeId; // Antwort verwerfen, falls inzwischen eine andere Route gewählt wurde
     const hoursNeeded = hoursRequired() + PAUSE_HEADROOM_H;
     const urls = buildForecastUrls(samples, hoursNeeded);
     state.loading = true;
@@ -686,6 +841,7 @@ if (typeof document !== 'undefined') (function () {
         const arr = Array.isArray(data) ? data : [data];
         for (const d of arr) results.push(d.hourly);
       }
+      if (rid !== state.routeId) return;
       if (results.length !== samples.length) throw new Error('Unerwartete Antwort von Open-Meteo.');
       if (state.demo) {
         results.forEach((h, i) => {
@@ -1222,7 +1378,9 @@ if (typeof document !== 'undefined') (function () {
     setInterval(updateVersionInfo, 30 * 1000);
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') updateVersionInfo(); });
 
-    if (state.gpxText) loadGpxText(state.gpxText);
+    setupRoutes();
+    loadRoutes();
+    if (state.routeId) activateRoute(state.routeId);
     else render();
 
     if ('serviceWorker' in navigator) {
