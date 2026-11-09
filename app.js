@@ -1130,11 +1130,17 @@ if (typeof document !== 'undefined') (function () {
       });
     }
     rows.forEach(x => { if (x.m) x.summary = routeSummary(x.m, state.zx); });
-    showDaylightInfo(ok && ok.m ? ok.m.starts.length : 1);
+    // Routen, die wegen der Filter keine einzige Kachel mehr haben, ganz ausblenden
+    const filtered = !!(ok && ok.m && ok.m.keep !== undefined) || state.daylight || !!weatherFilter();
+    const shown = rows.filter(x => !filtered || !x.summary || x.summary.some(y => y.cell));
+    const hiddenN = rows.length - shown.length;
+    $('routeInfo').textContent = 'Vergleich · ' + (hiddenN ? shown.length + ' von ' + rows.length : rows.length) + ' Routen' + (hiddenN ? ' (Filter)' : '');
+    $('routeInfo').title = $('routeInfo').textContent;
+    showDaylightInfo(shown.some(x => x.summary) && ok && ok.m ? ok.m.starts.length : (filtered && hiddenN === rows.length ? 0 : 1));
     // Skalen aus allen Fahrtzellen aller Routen
-    const allRows = rows.filter(x => x.m).flatMap(x => x.m.rows);
+    const allRows = shown.filter(x => x.m).flatMap(x => x.m.rows);
     const sc = scalesFor(matrixExtremes({ rows: allRows }));
-    const ref = rows.find(x => x.summary);
+    const ref = shown.find(x => x.summary) || rows.find(x => x.summary);
     const starts = ref ? ref.summary.map(x => x.start) : [];
 
     let html = '<thead><tr><th class="corner" scope="col">Route · km · Dauer<br>' +
@@ -1148,7 +1154,7 @@ if (typeof document !== 'undefined') (function () {
       html += '<th scope="col" data-col="' + idx + '"' + (idx === 0 ? ' class="now"' : '') + '><span class="day">' + esc(dayLabel || '\u00a0') + '</span>' + fmtTime.format(d) + '</th>';
     });
     html += '</tr></thead><tbody>';
-    rows.forEach((x, ri) => {
+    shown.forEach((x, ri) => {
       const r = x.r;
       const name = r.name || 'Route ohne Namen';
       const nameCls = name.length > 44 ? ' xlong' : name.length > 22 ? ' long' : '';
