@@ -736,10 +736,14 @@ if (typeof document !== 'undefined') (function () {
     }
     const fill = tempFill(st);
     if (fill) layers.push('linear-gradient(' + fill.css + ',' + fill.css + ')');
-    const style = layers.length ? ' style="background-image:' + layers.join(',') + '"' : '';
+    const bg = layers.length ? 'background-image:' + layers.join(',') : '';
+    // Pausenzellen: Wetterfarbe als eingerückte Kachel auf neutralem Grund
+    const isPause = / pz\b/.test(extra);
+    const style = !isPause && bg ? ' style="' + bg + '"' : '';
+    const tile = isPause ? '<div class="tile"' + (bg ? ' style="' + bg + '"' : '') + '></div>' : '';
     const dark = fill && fill.dark ? ' dark' : '';
     const rainTxt = c.r < 0.05 ? '0' : fmtNum1.format(c.r);
-    return '<td class="cell' + dark + extra + '"' + attrs + style + '>' + windWedges(c, sc) +
+    return '<td class="cell' + dark + extra + '"' + attrs + style + '>' + tile + windWedges(c, sc) +
       wrapIn('<span class="vals"><b>' + Math.round(c.t) + '°</b><i class="vr">' + rainTxt + '</i><i class="vw">' + Math.round(c.w) + '</i></span>') + '</td>';
   }
 

@@ -13,7 +13,7 @@ PWA, die für eine GPX-Route das Wetter entlang der Strecke für verschiedene Ab
    - **Wegpunkte** (`wpt`) mit Flaggen-Symbol (`<sym>` beginnt mit „Flag“) erscheinen als eigene, benannte Zeilen; Regelpunkte näher als 10 min daran entfallen. Liegen Wegpunkte weniger als 10 min auseinander, werden sie zu einer Zeile zusammengefasst (Werte des ersten bzw. bei mehr als zwei des mittleren, Namen mit „ / “). Lange Namen brechen um; Antippen einer Zelle der Zeile zeigt den Namen vollständig.
    - **Pausen:** Zeilenkopf antippen → Infofeld, Pause nach diesem Punkt in 1-h-Schritten (+/−). Die Pausenzeile zeigt das Wetter am Pausenort während der Pause; die folgenden Zeilen zeigen das Wetter zur entsprechend späteren Ankunft.
    - **Uhrzeit-Pausen:** Spaltenkopf antippen → Infofeld, Pause nach dieser Abfahrtsspalte (Spalte 22:00 → Pause um 23:00, z. B. 7 h). Die Pausenspalte zeigt das Wetter an jedem Tourpunkt während des Pausenzeitraums.
-   - Pausenzellen sind blass mit gestricheltem Rand; zusammengefasst wird wie beim Zoom (über 22 °C Maximum, sonst Minimum; Regen und Wind gemittelt).
+   - Pausenzellen zeigen das Wetter als eingerückte Kachel auf Sandgrund; zusammengefasst wird wie beim Zoom (über 22 °C Maximum, sonst Minimum; Regen und Wind gemittelt).
    - **Demo:** Mit `?demo` in der URL wird zusätzlich simulierter Regen in die Daten gemischt.
    - **Zeilen:** Tourpunkte alle 15 min Fahrzeit. Enthält die GPX plausible `<time>`-Angaben, wird die Fahrzeit daraus übernommen; sonst wird mit der Ø-Geschwindigkeit aus dem Menü geschätzt (Standard 20 km/h) und ein Hinweis angezeigt.
    - **Spalten:** Abfahrt jetzt, +1 h, … +47 h (Kopf auf 30 min gerundet).

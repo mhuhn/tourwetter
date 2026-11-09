@@ -227,15 +227,17 @@ main { flex: 1; min-height: 0; display: flex; flex-direction: column; position: 
 .pause-col.enter .pw, .pause-col.leave .pw, .pause-col-h.enter .pw, .pause-col-h.leave .pw { width: 0; }
 .pause-col:not(.pause-row td) .pw { height: 66px; }
 .pause-row th .pw { justify-content: flex-start; padding: 0 8px 0 10px; }
-td.pz::after {
-  content: ""; position: absolute; inset: 0; pointer-events: none; z-index: 1;
-  background: var(--veil);
-  outline: 1.5px dashed var(--pause-line); outline-offset: -4px;
+/* Pausenzellen: Wetterfarbe als eingerückte, abgerundete Kachel auf neutralem Sandgrund */
+.matrix td.pz { background-color: var(--pause-ground); }
+.matrix td.pz.na { background-color: var(--pause-ground); }
+td.pz .tile {
+  position: absolute; inset: 7px; border-radius: 10px; z-index: 0;
+  background-color: var(--card);
+  box-shadow: 0 0 0 1.5px var(--pause-line);
 }
 td.pz .vals { z-index: 2; }
-td.pz.show::after { background: transparent; }
-:root { --veil: rgba(250, 247, 241, 0.58); --pause-line: rgba(31, 61, 43, 0.45); }
-@media (prefers-color-scheme: dark) { :root { --veil: rgba(18, 24, 20, 0.6); --pause-line: rgba(159, 216, 176, 0.5); } }
+:root { --pause-ground: #E9E4D8; --pause-line: rgba(31, 61, 43, 0.4); }
+@media (prefers-color-scheme: dark) { :root { --pause-ground: #262E28; --pause-line: rgba(159, 216, 176, 0.45); } }
 .pr-txt { display: flex; flex-direction: column; justify-content: center; }
 .pause-row .rh-time { color: var(--green-2); font-size: 13px; font-style: italic; }
 .pause-row th[data-prowedit] { cursor: pointer; }
